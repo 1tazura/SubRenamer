@@ -1,0 +1,27 @@
+INPUT
+
+/storage/emulated/0/Download/
+  Torrent/
+    [ANi] Sousou no Frieren [01-28]/
+      [ANi] Sousou no Frieren - 01.mkv
+      [ANi] Sousou no Frieren - 02.mkv
+      ...
+  Sousou.no.Frieren.CHS.01-28.zip
+  unrelated.apk
+
+LOGICAL FLOW
+
+Sousou.no.Frieren.CHS.01-28.zip
+    -> rank Torrent targets
+    -> Torrent/[ANi] Sousou no Frieren [01-28]
+    -> read subtitle entry filenames
+    -> original SubRenamer.Core episode mapping
+    -> preview
+
+APPLY
+
+Torrent/[ANi] Sousou no Frieren [01-28]/
+  [ANi] Sousou no Frieren - 01.mkv     (untouched)
+  [ANi] Sousou no Frieren - 01.ass     (created)
+  [ANi] Sousou no Frieren - 02.mkv     (untouched)
+  [ANi] Sousou no Frieren - 02.ass     (created)
