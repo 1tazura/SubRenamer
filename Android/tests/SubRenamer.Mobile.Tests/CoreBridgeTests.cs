@@ -1,3 +1,4 @@
+using NUnit.Framework;
 using SubRenamer.Mobile.Services;
 
 namespace SubRenamer.Mobile.Tests;
