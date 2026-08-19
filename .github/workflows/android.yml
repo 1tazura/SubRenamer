@@ -72,24 +72,22 @@ jobs:
           path: Android/android-build.log
           if-no-files-found: warn
 
-      - name: Collect and verify standalone APK
+      - name: Collect standalone APK and package listing
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifacts
           signed_apk="$(find Android/src/SubRenamer.Mobile.Android/bin -type f -name '*-Signed.apk' -print -quit)"
           test -n "$signed_apk"
-
           echo "Signed APK: $signed_apk"
-          echo "Embedded assembly stores:"
-          unzip -Z1 "$signed_apk" | grep -E '^lib/[^/]+/libassemblies\.[^/]+\.blob\.so$' | tee /tmp/assembly-stores.txt
-          test -s /tmp/assembly-stores.txt
-
+          unzip -l "$signed_apk" > artifacts/apk-contents.txt
           cp "$signed_apk" artifacts/SubRenamer-Android-debug-signed.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: SubRenamer-Android-debug
-          path: artifacts/SubRenamer-Android-debug-signed.apk
+          path: |
+            artifacts/SubRenamer-Android-debug-signed.apk
+            artifacts/apk-contents.txt
           if-no-files-found: error
