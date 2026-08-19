@@ -72,7 +72,7 @@ jobs:
           path: Android/android-build.log
           if-no-files-found: warn
 
-      - name: Collect standalone APK and package listing
+      - name: Collect and verify standalone APK
         shell: bash
         run: |
           set -euo pipefail
@@ -80,7 +80,14 @@ jobs:
           signed_apk="$(find Android/src/SubRenamer.Mobile.Android/bin -type f -name '*-Signed.apk' -print -quit)"
           test -n "$signed_apk"
           echo "Signed APK: $signed_apk"
-          unzip -l "$signed_apk" > artifacts/apk-contents.txt
+          unzip -Z1 "$signed_apk" > artifacts/apk-contents.txt
+
+          # .NET 10 Android packages embedded managed assemblies as lib_<name>.dll.so.
+          # Require the app, shared mobile layer and original Core in the arm64 payload.
+          grep -Fxq 'lib/arm64-v8a/lib_SubRenamer.Mobile.Android.dll.so' artifacts/apk-contents.txt
+          grep -Fxq 'lib/arm64-v8a/lib_SubRenamer.Mobile.dll.so' artifacts/apk-contents.txt
+          grep -Fxq 'lib/arm64-v8a/lib_SubRenamer.Core.dll.so' artifacts/apk-contents.txt
+
           cp "$signed_apk" artifacts/SubRenamer-Android-debug-signed.apk
 
       - name: Upload APK artifact
