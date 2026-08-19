@@ -19,12 +19,14 @@ public sealed class ArchiveService
 
         return session.Entries
             .Where(x => !x.IsDirectory)
-            .Where(x => ScanService.SubtitleExtensions.Contains(Path.GetExtension(x.Key)))
-            .Select(x => new SubtitleEntryRef(
-                x.Key,
-                Path.GetFileName(x.Key),
-                Path.GetExtension(x.Key),
-                x.Size))
+            .Select(x => new { Entry = x, Key = x.Key })
+            .Where(x => !string.IsNullOrEmpty(x.Key))
+            .Select(x => x.Key!)
+            .Where(key => ScanService.SubtitleExtensions.Contains(Path.GetExtension(key)))
+            .Select(key => new SubtitleEntryRef(
+                key,
+                Path.GetFileName(key),
+                Path.GetExtension(key)))
             .ToArray();
     }
 
@@ -90,7 +92,7 @@ public sealed class ArchiveService
             _tempPath = tempPath;
         }
 
-        public IEnumerable<SharpCompress.Archives.IArchiveEntry> Entries => _archive.Entries;
+        public IEnumerable<IArchiveEntry> Entries => _archive.Entries;
 
         public async Task CopyEntryToAsync(
             string entryKey,
