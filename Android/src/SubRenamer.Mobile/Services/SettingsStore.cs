@@ -10,11 +10,16 @@ public sealed class SettingsStore
 
     public SettingsStore()
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SubRenamerMobile");
-        Directory.CreateDirectory(dir);
-        _path = Path.Combine(dir, "settings.json");
+        // Do not touch the filesystem while MainView is being constructed.
+        // On Android, storage-backed special folders may not be ready until the
+        // application/activity is fully initialized.
+        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(baseDir))
+            baseDir = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+        if (string.IsNullOrWhiteSpace(baseDir))
+            baseDir = Path.GetTempPath();
+
+        _path = Path.Combine(baseDir, "SubRenamerMobile", "settings.json");
     }
 
     public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
@@ -36,6 +41,10 @@ public sealed class SettingsStore
 
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
+        var dir = Path.GetDirectoryName(_path);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
         await using var stream = File.Create(_path);
         await JsonSerializer.SerializeAsync(
             stream,
