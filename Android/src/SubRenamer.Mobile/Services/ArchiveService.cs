@@ -19,14 +19,15 @@ public sealed class ArchiveService
 
         return session.Entries
             .Where(x => !x.IsDirectory)
-            .Select(x => new { Entry = x, Key = x.Key })
+            .Select(x => new { Key = x.Key, x.Size })
             .Where(x => !string.IsNullOrEmpty(x.Key))
-            .Select(x => x.Key!)
-            .Where(key => ScanService.SubtitleExtensions.Contains(Path.GetExtension(key)))
-            .Select(key => new SubtitleEntryRef(
-                key,
-                Path.GetFileName(key),
-                Path.GetExtension(key)))
+            .Select(x => new { Key = x.Key!, x.Size })
+            .Where(x => ScanService.SubtitleExtensions.Contains(Path.GetExtension(x.Key)))
+            .Select(x => new SubtitleEntryRef(
+                x.Key,
+                Path.GetFileName(x.Key),
+                Path.GetExtension(x.Key),
+                x.Size))
             .ToArray();
     }
 
