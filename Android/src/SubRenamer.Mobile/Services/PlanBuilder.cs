@@ -98,9 +98,6 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
                 "SubRenamer.Core 未将此字幕映射到视频。"));
         }
 
-        if (target.Videos.Count < 2 || source.Entries.Count < 2)
-            diagnostics.Add("原自动匹配模式通常需要至少 2 个格式一致的视频和 2 个字幕；当前集合可能不足。");
-
         return new MatchPlan(source, target, items, diagnostics);
     }
 }
