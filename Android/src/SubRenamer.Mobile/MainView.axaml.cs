@@ -42,28 +42,40 @@ public partial class MainView : UserControl
     {
         try
         {
-            StatusText.Text = "恢复 Download 授权…";
-            _downloadRoot = await _storage.RestoreOrPickDownloadAsync(this);
+            StatusText.Text = "正在检查已保存的 Download 授权…";
+            _downloadRoot = await _storage.RestoreDownloadAsync(this);
+
             if (_downloadRoot is null)
             {
-                RootText.Text = "未选择 Download 目录";
-                StatusText.Text = "首次使用请点“更换目录”，选择 /storage/emulated/0/Download。";
+                RootText.Text = "尚未授权 Download";
+                StatusText.Text = "首次使用请点“选择 Download”；以后授权会被保存。";
+                ScanButton.IsEnabled = false;
                 return;
             }
 
-            RootText.Text = $"已授权：{_downloadRoot.Name}";
-            await ScanAsync();
+            // Do not read IStorageFolder.Name here. Android's SAF returns a tree URI
+            // for the picked Download directory, and querying metadata on that raw
+            // tree URI is rejected by some DocumentsProvider implementations.
+            RootText.Text = "已授权：Download";
+            StatusText.Text = "已恢复 Download 授权。点“扫描字幕与视频”开始。";
+            ScanButton.IsEnabled = true;
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"初始化失败：{ex.Message}";
+            RootText.Text = "尚未授权 Download";
+            ScanButton.IsEnabled = false;
+            StatusText.Text = $"恢复授权失败：{ex.Message}。请重新选择 Download。";
         }
     }
 
     private async Task ScanAsync()
     {
-        if (_downloadRoot is null)
+        var root = _downloadRoot;
+        if (root is null)
+        {
+            StatusText.Text = "请先选择或恢复 Download 授权。";
             return;
+        }
 
         SetBusy(true);
         _cards.Clear();
@@ -73,13 +85,18 @@ public partial class MainView : UserControl
 
         try
         {
-            StatusText.Text = "扫描 Torrent 视频目录…";
-            _targets = await _scanner.FindVideoTargetsAsync(_downloadRoot);
+            StatusText.Text = "后台扫描 Torrent 视频目录与 Download 根目录字幕…";
 
-            StatusText.Text = "扫描 Download 根目录字幕来源…";
-            var sources = await _scanner.FindSubtitleSourcesAsync(_downloadRoot);
+            var result = await Task.Run(async () =>
+            {
+                var targets = await _scanner.FindVideoTargetsAsync(root).ConfigureAwait(false);
+                var sources = await _scanner.FindSubtitleSourcesAsync(root).ConfigureAwait(false);
+                return (Targets: targets, Sources: sources);
+            });
 
-            foreach (var source in sources)
+            _targets = result.Targets;
+
+            foreach (var source in result.Sources)
             {
                 var ranked = _attribution.Rank(source, _targets);
                 _cards.Add(new SourceCard
@@ -92,7 +109,7 @@ public partial class MainView : UserControl
             }
 
             StatusText.Text =
-                $"发现 {_targets.Count} 个视频目标目录，{sources.Count} 个字幕来源。";
+                $"发现 {_targets.Count} 个视频目标目录，{result.Sources.Count} 个字幕来源。";
 
             if (_cards.Count > 0)
                 SourceList.SelectedIndex = 0;
@@ -102,6 +119,7 @@ public partial class MainView : UserControl
         catch (Exception ex)
         {
             StatusText.Text = $"扫描失败：{ex.Message}";
+            PreviewText.Text = ex.ToString();
         }
         finally
         {
@@ -127,9 +145,10 @@ public partial class MainView : UserControl
         {
             card.State = "匹配中";
             StatusText.Text = $"调用原 SubRenamer.Core：{card.Source.DisplayName}";
-            _currentPlan = await _planner.BuildAsync(
-                card.Source,
-                card.SelectedCandidate.Target);
+
+            var source = card.Source;
+            var target = card.SelectedCandidate.Target;
+            _currentPlan = await Task.Run(() => _planner.BuildAsync(source, target));
 
             var lines = new List<string>
             {
@@ -214,13 +233,14 @@ public partial class MainView : UserControl
         if (_currentPlan is null || _currentPlan.ReadyCount == 0)
             return;
 
+        var plan = _currentPlan;
         SetBusy(true);
         ApplyButton.IsEnabled = false;
 
         try
         {
-            StatusText.Text = "写入字幕；视频保持原位…";
-            var result = await _apply.ApplyAsync(_currentPlan);
+            StatusText.Text = "后台写入字幕；视频保持原位…";
+            var result = await Task.Run(() => _apply.ApplyAsync(plan));
 
             var extra = result.Errors.Count == 0
                 ? ""
@@ -237,6 +257,7 @@ public partial class MainView : UserControl
         catch (Exception ex)
         {
             StatusText.Text = $"应用失败：{ex.Message}";
+            PreviewText.Text += Environment.NewLine + ex;
         }
         finally
         {
@@ -246,25 +267,65 @@ public partial class MainView : UserControl
 
     private async void Scan_Click(object? sender, RoutedEventArgs e) => await ScanAsync();
 
-    private async void ChangeRoot_Click(object? sender, RoutedEventArgs e)
+    private async void RestoreRoot_Click(object? sender, RoutedEventArgs e)
     {
+        SetBusy(true);
         try
         {
-            _downloadRoot = await _storage.RestoreOrPickDownloadAsync(this, forcePick: true);
+            StatusText.Text = "恢复 Download 授权…";
+            _downloadRoot = await _storage.RestoreDownloadAsync(this);
             if (_downloadRoot is null)
+            {
+                RootText.Text = "尚未授权 Download";
+                StatusText.Text = "没有可用的已保存授权，请点“选择 Download”。";
                 return;
+            }
 
-            RootText.Text = $"已授权：{_downloadRoot.Name}";
-            await ScanAsync();
+            RootText.Text = "已授权：Download";
+            StatusText.Text = "Download 授权已恢复。点“扫描字幕与视频”开始。";
+        }
+        catch (Exception ex)
+        {
+            _downloadRoot = null;
+            RootText.Text = "尚未授权 Download";
+            StatusText.Text = $"恢复授权失败：{ex.Message}";
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async void ChangeRoot_Click(object? sender, RoutedEventArgs e)
+    {
+        SetBusy(true);
+        try
+        {
+            _downloadRoot = await _storage.PickDownloadAsync(this);
+            if (_downloadRoot is null)
+            {
+                StatusText.Text = "未更改 Download 授权。";
+                return;
+            }
+
+            RootText.Text = "已授权：Download";
+            StatusText.Text = "授权已保存。点“扫描字幕与视频”开始；不会自动扫描。";
         }
         catch (Exception ex)
         {
             StatusText.Text = $"选择目录失败：{ex.Message}";
         }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private void SetBusy(bool busy)
     {
+        RestoreRootButton.IsEnabled = !busy;
+        ChangeRootButton.IsEnabled = !busy;
+        ScanButton.IsEnabled = !busy && _downloadRoot is not null;
         PreviewButton.IsEnabled = !busy;
         CandidateCombo.IsEnabled = !busy;
         SourceList.IsEnabled = !busy;
