@@ -48,6 +48,9 @@ public sealed class ApplyService(ArchiveService archiveService)
                 try
                 {
                     created = await plan.Target.Folder.CreateFileAsync(item.DestinationName);
+                    if (created is null)
+                        throw new IOException($"Could not create subtitle file: {item.DestinationName}");
+
                     await using var destination = await created.OpenWriteAsync();
 
                     if (plan.Source.Kind == SubtitleSourceKind.Archive)
