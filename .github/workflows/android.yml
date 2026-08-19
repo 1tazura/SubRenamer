@@ -58,11 +58,11 @@ jobs:
           path: Android/mobile-test.log
           if-no-files-found: warn
 
-      - name: Build debug-signed APK
+      - name: Build self-contained debug-signed APK
         shell: bash
         run: |
           set -o pipefail
-          dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj -c Debug -f net10.0-android -t:SignAndroidPackage --verbosity normal 2>&1 | tee Android/android-build.log
+          dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj -c Debug -f net10.0-android -t:SignAndroidPackage -p:EmbedAssembliesIntoApk=true --verbosity normal 2>&1 | tee Android/android-build.log
 
       - name: Upload Android build diagnostics
         if: failure()
@@ -72,16 +72,24 @@ jobs:
           path: Android/android-build.log
           if-no-files-found: warn
 
-      - name: Collect APK
+      - name: Collect and verify standalone APK
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p artifacts
-          find Android/src/SubRenamer.Mobile.Android/bin -type f -name '*.apk' -print -exec cp {} artifacts/ \;
-          test -n "$(find artifacts -type f -name '*.apk' -print -quit)"
+          signed_apk="$(find Android/src/SubRenamer.Mobile.Android/bin -type f -name '*-Signed.apk' -print -quit)"
+          test -n "$signed_apk"
+
+          echo "Signed APK: $signed_apk"
+          echo "Embedded assembly stores:"
+          unzip -Z1 "$signed_apk" | grep -E '^lib/[^/]+/libassemblies\.[^/]+\.blob\.so$' | tee /tmp/assembly-stores.txt
+          test -s /tmp/assembly-stores.txt
+
+          cp "$signed_apk" artifacts/SubRenamer-Android-debug-signed.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: SubRenamer-Android-debug
-          path: artifacts/
+          path: artifacts/SubRenamer-Android-debug-signed.apk
           if-no-files-found: error
