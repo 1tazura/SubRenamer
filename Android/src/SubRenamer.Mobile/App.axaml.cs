@@ -12,11 +12,11 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IActivityApplicationLifetime activityLifetime)
         {
-            activityLifetime.MainViewFactory = () => new MainView();
+            activityLifetime.MainViewFactory = () => new StartupView();
         }
         else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
         {
-            singleView.MainView = new MainView();
+            singleView.MainView = new StartupView();
         }
 
         base.OnFrameworkInitializationCompleted();
