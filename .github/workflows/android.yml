@@ -45,7 +45,32 @@ jobs:
         run: dotnet workload install android
 
       - name: Run Android integration tests
-        run: dotnet test Android/tests/SubRenamer.Mobile.Tests/SubRenamer.Mobile.Tests.csproj -c Release --verbosity normal
+        shell: bash
+        run: |
+          set +e
+          dotnet test Android/tests/SubRenamer.Mobile.Tests/SubRenamer.Mobile.Tests.csproj -c Release --verbosity diagnostic 2>&1 | tee Android/mobile-test.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > Android/mobile-test-exit.txt
+          exit 0
+
+      - name: Upload Android test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubRenamer-Android-test-diagnostics
+          path: |
+            Android/mobile-test.log
+            Android/mobile-test-exit.txt
+          if-no-files-found: warn
+
+      - name: Fail on Android integration test errors
+        shell: bash
+        run: |
+          code=$(cat Android/mobile-test-exit.txt)
+          if [ "$code" -ne 0 ]; then
+            echo "Android integration tests failed with exit code $code"
+            exit "$code"
+          fi
 
       - name: Build debug-signed APK
         run: >
