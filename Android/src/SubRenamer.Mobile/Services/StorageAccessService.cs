@@ -6,31 +6,35 @@ namespace SubRenamer.Mobile.Services;
 
 public sealed class StorageAccessService(SettingsStore settingsStore)
 {
-    public async Task<IStorageFolder?> RestoreOrPickDownloadAsync(
+    public async Task<IStorageFolder?> RestoreDownloadAsync(
         Control owner,
-        bool forcePick = false,
         CancellationToken cancellationToken = default)
     {
         var topLevel = TopLevel.GetTopLevel(owner)
                        ?? throw new InvalidOperationException("Storage UI is not attached to a TopLevel.");
         var provider = topLevel.StorageProvider;
+        var settings = await settingsStore.LoadAsync(cancellationToken);
 
-        if (!forcePick)
+        if (string.IsNullOrWhiteSpace(settings.DownloadBookmark))
+            return null;
+
+        try
         {
-            var settings = await settingsStore.LoadAsync(cancellationToken);
-            if (!string.IsNullOrWhiteSpace(settings.DownloadBookmark))
-            {
-                try
-                {
-                    var restored = await provider.OpenFolderBookmarkAsync(settings.DownloadBookmark);
-                    if (restored is not null)
-                        return restored;
-                }
-                catch
-                {
-                }
-            }
+            return await provider.OpenFolderBookmarkAsync(settings.DownloadBookmark);
         }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<IStorageFolder?> PickDownloadAsync(
+        Control owner,
+        CancellationToken cancellationToken = default)
+    {
+        var topLevel = TopLevel.GetTopLevel(owner)
+                       ?? throw new InvalidOperationException("Storage UI is not attached to a TopLevel.");
+        var provider = topLevel.StorageProvider;
 
         if (!provider.CanPickFolder)
             throw new NotSupportedException("This platform cannot pick folders.");
