@@ -10,12 +10,15 @@ public sealed record SubtitleSourceScanResult(
     TimeSpan ArchiveIndexElapsed,
     TimeSpan FinalizeElapsed,
     int ArchiveCount,
-    int LooseSubtitleCount);
+    int LooseSubtitleCount,
+    int ArchiveCacheHits,
+    int ArchiveValidated);
 
 public sealed class ScanService(ArchiveService archiveService)
 {
     private const int FolderScanConcurrency = 4;
     private const int ArchiveScanConcurrency = 2;
+    private readonly ArchiveIndexCacheStore _archiveCache = new();
 
     public static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -142,6 +145,11 @@ public sealed class ScanService(ArchiveService archiveService)
             .ToArray();
 
         var archiveWatch = Stopwatch.StartNew();
+        var cache = await _archiveCache.LoadAsync(cancellationToken);
+        var refreshedCache = new ArchiveIndexCacheRecord?[orderedArchives.Length];
+        var cacheHits = 0;
+        var validated = 0;
+
         if (orderedArchives.Length > 0)
         {
             var indexed = new SubtitleSource?[orderedArchives.Length];
@@ -152,7 +160,44 @@ public sealed class ScanService(ArchiveService archiveService)
                 await gate.WaitAsync(cancellationToken);
                 try
                 {
+                    var signature = await TryGetArchiveSignatureAsync(archive.File, cancellationToken);
+                    if (signature is not null &&
+                        cache.TryGetValue(signature.Identity, out var cached) &&
+                        cached.Size == signature.Size &&
+                        cached.ModifiedUtcTicks == signature.ModifiedUtcTicks)
+                    {
+                        refreshedCache[index] = cached;
+                        Interlocked.Increment(ref cacheHits);
+
+                        // Negative cache entries are equally important: this archive
+                        // was fully opened before and confirmed to contain no supported
+                        // subtitle files. Do not surface it as a subtitle source.
+                        if (cached.Entries.Length == 0)
+                            return;
+
+                        indexed[index] = new SubtitleSource(
+                            SubtitleSourceKind.Archive,
+                            archive.Name,
+                            archive.File,
+                            [],
+                            cached.Entries);
+                        return;
+                    }
+
+                    // A new/changed archive, a metadata-less provider, or any cache
+                    // miss follows the original eager path and is fully inspected.
                     var entries = await archiveService.ListSubtitleEntriesAsync(archive.File, cancellationToken);
+                    Interlocked.Increment(ref validated);
+
+                    if (signature is not null)
+                    {
+                        refreshedCache[index] = new ArchiveIndexCacheRecord(
+                            signature.Identity,
+                            signature.Size,
+                            signature.ModifiedUtcTicks,
+                            entries.ToArray());
+                    }
+
                     if (entries.Count == 0)
                         return;
 
@@ -169,6 +214,8 @@ public sealed class ScanService(ArchiveService archiveService)
                 }
                 catch
                 {
+                    // Do not keep/reuse a stale cache entry after a failed attempt to
+                    // validate a file whose signature no longer matched.
                 }
                 finally
                 {
@@ -179,6 +226,10 @@ public sealed class ScanService(ArchiveService archiveService)
             await Task.WhenAll(tasks);
             sources.AddRange(indexed.OfType<SubtitleSource>());
         }
+
+        // Save one coherent snapshot after the parallel work. Removed archives are
+        // naturally pruned, and failures/metadata-less files are revalidated later.
+        await _archiveCache.SaveAsync(refreshedCache.OfType<ArchiveIndexCacheRecord>(), cancellationToken);
         archiveWatch.Stop();
 
         var finalizeWatch = Stopwatch.StartNew();
@@ -206,9 +257,41 @@ public sealed class ScanService(ArchiveService archiveService)
             archiveWatch.Elapsed,
             finalizeWatch.Elapsed,
             orderedArchives.Length,
-            loose.Count);
+            loose.Count,
+            cacheHits,
+            validated);
     }
 
+    private static async Task<ArchiveSignature?> TryGetArchiveSignatureAsync(
+        IStorageFile file,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var properties = await file.GetBasicPropertiesAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (properties.Size is not { } size || properties.DateModified is not { } modified)
+                return null;
+
+            return new ArchiveSignature(
+                file.Path.ToString(),
+                size,
+                modified.UtcDateTime.Ticks);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Metadata is an optimization only. Missing/unreliable metadata must
+            // cause a full archive inspection rather than weakening correctness.
+            return null;
+        }
+    }
+
+    private sealed record ArchiveSignature(string Identity, ulong Size, long ModifiedUtcTicks);
     private sealed record NamedFile(IStorageFile File, string Name);
     private sealed record NamedFolder(IStorageFolder Folder, string Name);
     private sealed record FolderWork(IStorageFolder Folder, string RelativePath, int Depth);
