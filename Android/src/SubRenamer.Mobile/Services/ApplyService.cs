@@ -15,6 +15,15 @@ public sealed class ApplyService(ArchiveService archiveService)
         var skipped = 0;
         var errors = new List<string>();
 
+        // Recheck the directory once at apply time so a file created after preview
+        // is still protected, without issuing one full SAF directory query per item.
+        var existingNames = await StorageAccessService.SnapshotChildFileNamesAsync(
+            plan.Target.Folder, cancellationToken);
+
+        var looseByName = plan.Source.Kind == SubtitleSourceKind.LooseGroup
+            ? plan.Source.LooseFiles.ToDictionary(x => x.Name, StringComparer.Ordinal)
+            : null;
+
         ArchiveService.ArchiveSession? archiveSession = null;
         try
         {
@@ -36,9 +45,7 @@ public sealed class ApplyService(ArchiveService archiveService)
                     continue;
                 }
 
-                var existing = await StorageAccessService.FindChildFileAsync(
-                    plan.Target.Folder, item.DestinationName, cancellationToken);
-                if (existing is not null)
+                if (existingNames.Contains(item.DestinationName))
                 {
                     skipped++;
                     continue;
@@ -62,9 +69,7 @@ public sealed class ApplyService(ArchiveService archiveService)
                     }
                     else
                     {
-                        var sourceFile = plan.Source.LooseFiles
-                            .FirstOrDefault(x => string.Equals(x.Name, item.SourceKey, StringComparison.Ordinal));
-                        if (sourceFile is null)
+                        if (looseByName is null || !looseByName.TryGetValue(item.SourceKey, out var sourceFile))
                             throw new FileNotFoundException($"Loose subtitle source not found: {item.SourceKey}");
 
                         await using var source = await sourceFile.OpenReadAsync();
@@ -72,6 +77,7 @@ public sealed class ApplyService(ArchiveService archiveService)
                     }
 
                     await destination.FlushAsync(cancellationToken);
+                    existingNames.Add(item.DestinationName);
                     applied++;
                 }
                 catch (Exception ex)
