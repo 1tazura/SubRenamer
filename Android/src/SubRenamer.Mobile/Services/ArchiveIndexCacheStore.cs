@@ -7,10 +7,13 @@ public sealed record ArchiveIndexCacheRecord(
     string Identity,
     ulong Size,
     long ModifiedUtcTicks,
-    SubtitleEntryRef[] Entries)
+    SubtitleEntryRef[] Entries,
+    string? StableRejectionError = null)
 {
     public bool Matches(ulong size, long modifiedUtcTicks)
         => Size == size && ModifiedUtcTicks == modifiedUtcTicks;
+
+    public bool IsStableRejection => !string.IsNullOrWhiteSpace(StableRejectionError);
 }
 
 /// <summary>
