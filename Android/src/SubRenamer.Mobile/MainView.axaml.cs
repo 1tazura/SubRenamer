@@ -53,9 +53,6 @@ public partial class MainView : UserControl
                 return;
             }
 
-            // Do not read IStorageFolder.Name here. Android's SAF returns a tree URI
-            // for the picked Download directory, and querying metadata on that raw
-            // tree URI is rejected by some DocumentsProvider implementations.
             RootText.Text = "已授权：Download";
             StatusText.Text = "已恢复 Download 授权。点“扫描字幕与视频”开始。";
             ScanButton.IsEnabled = true;
@@ -81,6 +78,7 @@ public partial class MainView : UserControl
         _cards.Clear();
         _currentPlan = null;
         PreviewText.Text = "";
+        ApplyButton.Content = "确认处理";
         ApplyButton.IsEnabled = false;
 
         try
@@ -136,6 +134,7 @@ public partial class MainView : UserControl
         {
             _currentPlan = null;
             PreviewText.Text = "无法可靠自动归属。请从上方列表点选正确的 Torrent 目录。";
+            ApplyButton.Content = "确认处理";
             ApplyButton.IsEnabled = false;
             return;
         }
@@ -181,14 +180,15 @@ public partial class MainView : UserControl
             }
 
             PreviewText.Text = string.Join(Environment.NewLine, lines);
-            ApplyButton.Content = $"应用 {_currentPlan.ReadyCount} 项";
+            ApplyButton.Content = $"确认处理 {_currentPlan.ReadyCount} 项";
             ApplyButton.IsEnabled = _currentPlan.ReadyCount > 0;
             card.State = $"{_currentPlan.ReadyCount} 可应用";
-            StatusText.Text = "预览已生成；视频文件不会被修改。";
+            StatusText.Text = "预览已生成；确认后只写入字幕，视频文件不会被修改。";
         }
         catch (Exception ex)
         {
             _currentPlan = null;
+            ApplyButton.Content = "确认处理";
             ApplyButton.IsEnabled = false;
             card.State = "匹配失败";
             PreviewText.Text = ex.ToString();
