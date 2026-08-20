@@ -11,7 +11,12 @@ public sealed record UndoBatchRecord(
 
 public sealed record AppSettings(
     string? DownloadBookmark = null,
-    UndoBatchRecord? LastUndoBatch = null);
+    UndoBatchRecord? LastUndoBatch = null,
+    CoreMatchMode MatchMode = CoreMatchMode.Diff,
+    string ManualVideoPattern = "",
+    string ManualSubtitlePattern = "",
+    string VideoRegex = "",
+    string SubtitleRegex = "");
 
 public sealed class SettingsStore
 {
@@ -91,5 +96,24 @@ public sealed class SettingsStore
             return;
 
         await SaveAsync(current with { LastUndoBatch = null }, cancellationToken);
+    }
+
+    public async Task SaveMatchSettingsAsync(
+        CoreMatchMode mode,
+        string manualVideoPattern,
+        string manualSubtitlePattern,
+        string videoRegex,
+        string subtitleRegex,
+        CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        await SaveAsync(current with
+        {
+            MatchMode = mode,
+            ManualVideoPattern = manualVideoPattern,
+            ManualSubtitlePattern = manualSubtitlePattern,
+            VideoRegex = videoRegex,
+            SubtitleRegex = subtitleRegex,
+        }, cancellationToken);
     }
 }
