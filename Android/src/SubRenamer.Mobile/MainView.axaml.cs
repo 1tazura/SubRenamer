@@ -24,7 +24,14 @@ public partial class MainView : UserControl
     private MatchPlan? _currentPlan;
     private UndoBatchRecord? _undoBatch;
     private bool _suppressCandidateChanged;
+    private bool _suppressMatchModeChanged = true;
     private bool _busy;
+
+    private CoreMatchMode _matchMode = CoreMatchMode.Diff;
+    private string _manualVideoPattern = "";
+    private string _manualSubtitlePattern = "";
+    private string _videoRegex = "";
+    private string _subtitleRegex = "";
 
     public MainView()
     {
@@ -34,6 +41,9 @@ public partial class MainView : UserControl
         _apply = new ApplyService(_archives);
         _undo = new UndoService(_settings);
         SourceList.ItemsSource = _cards;
+
+        _suppressMatchModeChanged = false;
+        UpdateMatchModeUi();
 
         AttachedToVisualTree += async (_, _) =>
         {
@@ -47,6 +57,7 @@ public partial class MainView : UserControl
         try
         {
             StatusText.Text = "正在检查已保存的 Download 授权…";
+            ApplyLoadedMatchSettings(await _settings.LoadAsync());
             _downloadRoot = await _storage.RestoreDownloadAsync(this);
 
             if (_downloadRoot is null)
@@ -71,6 +82,103 @@ public partial class MainView : UserControl
             UpdateUndoButton();
         }
     }
+
+    private void ApplyLoadedMatchSettings(AppSettings settings)
+    {
+        _matchMode = Enum.IsDefined(settings.MatchMode) ? settings.MatchMode : CoreMatchMode.Diff;
+        _manualVideoPattern = settings.ManualVideoPattern ?? "";
+        _manualSubtitlePattern = settings.ManualSubtitlePattern ?? "";
+        _videoRegex = settings.VideoRegex ?? "";
+        _subtitleRegex = settings.SubtitleRegex ?? "";
+
+        _suppressMatchModeChanged = true;
+        MatchModeCombo.SelectedIndex = (int)_matchMode;
+        _suppressMatchModeChanged = false;
+        UpdateMatchModeUi();
+    }
+
+    private void CaptureActiveRulesFromUi()
+    {
+        switch (_matchMode)
+        {
+            case CoreMatchMode.Manual:
+                _manualVideoPattern = VideoRuleTextBox.Text ?? "";
+                _manualSubtitlePattern = SubtitleRuleTextBox.Text ?? "";
+                break;
+            case CoreMatchMode.Regex:
+                _videoRegex = VideoRuleTextBox.Text ?? "";
+                _subtitleRegex = SubtitleRuleTextBox.Text ?? "";
+                break;
+        }
+    }
+
+    private void UpdateMatchModeUi()
+    {
+        switch (_matchMode)
+        {
+            case CoreMatchMode.Diff:
+                MatchRulePanel.IsVisible = false;
+                MatchRuleHint.Text = "自动模式使用原 SubRenamer.Core 的 diff → extract → mapping。";
+                break;
+            case CoreMatchMode.Manual:
+                MatchRulePanel.IsVisible = true;
+                VideoRuleLabel.Text = "视频手动规则";
+                SubtitleRuleLabel.Text = "字幕手动规则";
+                VideoRuleTextBox.Text = _manualVideoPattern;
+                SubtitleRuleTextBox.Text = _manualSubtitlePattern;
+                MatchRuleHint.Text = "与桌面版手动规则一致：$$ 表示集数/匹配键，* 表示任意文本。例如：Show - $$ *.mkv";
+                break;
+            case CoreMatchMode.Regex:
+                MatchRulePanel.IsVisible = true;
+                VideoRuleLabel.Text = "视频正则";
+                SubtitleRuleLabel.Text = "字幕正则";
+                VideoRuleTextBox.Text = _videoRegex;
+                SubtitleRuleTextBox.Text = _subtitleRegex;
+                MatchRuleHint.Text = "SubRenamer.Core 使用捕获组 1 作为匹配键。示例：S02E(\\d+)。";
+                break;
+        }
+    }
+
+    private CoreMatchSettings GetActiveMatchSettings()
+    {
+        CaptureActiveRulesFromUi();
+        return _matchMode switch
+        {
+            CoreMatchMode.Diff => new CoreMatchSettings(CoreMatchMode.Diff),
+            CoreMatchMode.Manual => new CoreMatchSettings(
+                CoreMatchMode.Manual, _manualVideoPattern, _manualSubtitlePattern),
+            CoreMatchMode.Regex => new CoreMatchSettings(
+                CoreMatchMode.Regex, _videoRegex, _subtitleRegex),
+            _ => new CoreMatchSettings(CoreMatchMode.Diff),
+        };
+    }
+
+    private async Task PersistMatchSettingsAsync()
+    {
+        CaptureActiveRulesFromUi();
+        try
+        {
+            await _settings.SaveMatchSettingsAsync(
+                _matchMode,
+                _manualVideoPattern,
+                _manualSubtitlePattern,
+                _videoRegex,
+                _subtitleRegex);
+        }
+        catch
+        {
+            // Matching must remain usable even if app-private preference storage
+            // temporarily fails. The active in-memory rules are still used.
+        }
+    }
+
+    private static string MatchModeText(CoreMatchMode mode) => mode switch
+    {
+        CoreMatchMode.Diff => "自动 (Diff)",
+        CoreMatchMode.Manual => "手动规则",
+        CoreMatchMode.Regex => "正则表达式",
+        _ => mode.ToString(),
+    };
 
     private async Task RefreshUndoBatchAsync()
     {
@@ -162,20 +270,24 @@ public partial class MainView : UserControl
             return;
         }
 
+        var matchSettings = GetActiveMatchSettings();
+        await PersistMatchSettingsAsync();
+
         SetBusy(true);
         try
         {
             card.State = "匹配中";
-            StatusText.Text = $"调用原 SubRenamer.Core：{card.Source.DisplayName}";
+            StatusText.Text = $"调用原 SubRenamer.Core · {MatchModeText(matchSettings.Mode)}：{card.Source.DisplayName}";
 
             var source = card.Source;
             var target = card.SelectedCandidate.Target;
-            _currentPlan = await Task.Run(() => _planner.BuildAsync(source, target));
+            _currentPlan = await Task.Run(() => _planner.BuildAsync(source, target, matchSettings));
 
             var lines = new List<string>
             {
                 $"来源：{card.Source.DisplayName}",
                 $"目标：{card.SelectedCandidate.Target.RelativePath}",
+                $"匹配模式：{MatchModeText(matchSettings.Mode)}",
                 $"可应用：{_currentPlan.ReadyCount}",
                 $"冲突：{_currentPlan.ConflictCount}",
                 "",
@@ -206,7 +318,7 @@ public partial class MainView : UserControl
             ApplyButton.Content = $"确认处理 {_currentPlan.ReadyCount} 项";
             ApplyButton.IsEnabled = _currentPlan.ReadyCount > 0;
             card.State = $"{_currentPlan.ReadyCount} 可应用";
-            StatusText.Text = "预览已生成；确认后只写入字幕，视频文件不会被修改。";
+            StatusText.Text = $"{MatchModeText(matchSettings.Mode)} 预览已生成；确认后只写入字幕，视频文件不会被修改。";
         }
         catch (Exception ex)
         {
@@ -215,7 +327,7 @@ public partial class MainView : UserControl
             ApplyButton.IsEnabled = false;
             card.State = "匹配失败";
             PreviewText.Text = ex.ToString();
-            StatusText.Text = "SubRenamer.Core 匹配失败；错误信息已显示在预览区。";
+            StatusText.Text = "SubRenamer.Core 匹配失败；请检查当前匹配模式/规则。";
         }
         finally
         {
@@ -247,6 +359,28 @@ public partial class MainView : UserControl
         card.SelectedCandidate = CandidateCombo.SelectedItem as AttributionCandidate;
         card.State = card.SelectedCandidate is null ? "待确认归属" : "手动归属";
         await BuildPreviewAsync();
+    }
+
+    private async void MatchModeCombo_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressMatchModeChanged)
+            return;
+
+        CaptureActiveRulesFromUi();
+        _matchMode = MatchModeCombo.SelectedIndex switch
+        {
+            1 => CoreMatchMode.Manual,
+            2 => CoreMatchMode.Regex,
+            _ => CoreMatchMode.Diff,
+        };
+        UpdateMatchModeUi();
+        await PersistMatchSettingsAsync();
+
+        _currentPlan = null;
+        ApplyButton.Content = "确认处理";
+        ApplyButton.IsEnabled = false;
+        PreviewText.Text = $"已切换为 {MatchModeText(_matchMode)}。填写需要的规则后点“重新生成预览”。";
+        StatusText.Text = $"集数匹配模式：{MatchModeText(_matchMode)}。";
     }
 
     private async void Preview_Click(object? sender, RoutedEventArgs e) => await BuildPreviewAsync();
@@ -431,6 +565,9 @@ public partial class MainView : UserControl
         PreviewButton.IsEnabled = !busy;
         CandidateCombo.IsEnabled = !busy;
         SourceList.IsEnabled = !busy;
+        MatchModeCombo.IsEnabled = !busy;
+        VideoRuleTextBox.IsEnabled = !busy;
+        SubtitleRuleTextBox.IsEnabled = !busy;
         UpdateUndoButton();
     }
 }
