@@ -81,6 +81,21 @@
                 Click="Apply_Click"
                 IsEnabled="False"/>
 
+        <Button x:Name="UndoButton"
+                MinHeight="48"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                Content="撤销上次处理"
+                Click="Undo_Click"
+                IsEnabled="False"/>
+
+        <TextBlock Margin="0,4,0,0"
+                   Opacity="0.6"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   Text="撤销只删除上一次由本应用创建且内容未被修改的字幕文件。"/>
+
         <TextBlock x:Name="PreviewText"
                    Margin="0,12,0,0"
                    FontFamily="monospace"
