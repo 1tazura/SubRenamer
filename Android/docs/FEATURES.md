@@ -2,7 +2,7 @@
 
 This document is the source of truth for **feature parity claims** between the upstream desktop application and the Android port.
 
-The Android port should not be described as a full UI port. It currently reuses the upstream matching Core inside a mobile-specific storage and safety workflow.
+The Android port should not be described as a full UI port. It reuses the upstream matching Core inside a mobile-specific storage and safety workflow.
 
 Legend:
 
@@ -18,10 +18,10 @@ Legend:
 | Automatic diff matching | ✅ | ✅ | Android calls the original `SubRenamer.Core.Matcher.Execute`. |
 | One-to-many / multilingual mapping | ✅ | ✅ | Android preserves recognized language tags when multiple same-extension subtitles map to one video. |
 | Preview planned filenames | ✅ | ✅ | Android previews exact source → destination operations. |
-| Manual matching mode | ✅ | ❌ | High-priority gap. This is episode-level matching, distinct from Android's torrent-target selection. |
-| Regex matching mode | ✅ | ❌ | Core supports options; Android lacks configuration/editor UI. |
-| Manual matching rule editor | ✅ | ❌ | High-priority gap. |
-| Regex editor / tester | ✅ | ❌ | Medium/high priority. |
+| Manual matching mode | ✅ | ✅ | Android exposes desktop-compatible `$$` key marker + `*` wildcard rules and converts them to Core regex options. |
+| Regex matching mode | ✅ | ✅ | Android passes user video/subtitle regex directly through `MatcherOptions`; capture group 1 is the matching key. |
+| Manual matching rule editor | ✅ | 🟡 | Android has a compact rule-entry UI but not the desktop sample-file tester/editor. |
+| Regex editor / tester | ✅ | 🟡 | Android has direct regex entry + validation but not the full desktop test editor. |
 | Per-item match correction | ✅ | ❌ | High-priority mobile escape hatch for SP/OVA/NCOP and unusual packs. |
 | Delete/edit imported rows | ✅ | ❌ | Should be redesigned for touch instead of copied literally. |
 
@@ -79,13 +79,13 @@ Legend:
 
 ## Interpretation
 
-The Android port has completed the **automatic-match + safe-placement** path, but most of the upstream toolset for **recovering when automatic matching is insufficient** is still absent.
+The Android port now exposes all three Core episode-matching paths used by the desktop application: automatic Diff, manual-rule-derived regex, and direct Regex. The remaining major recovery gap is **per-item correction/exclusion after a match result is generated**.
 
-The most important parity work is therefore:
+The next important parity work is therefore:
 
 1. per-item correction/exclusion;
-2. Manual and Regex matching modes;
-3. language filtering and output naming settings;
-4. a proper settings surface.
+2. language filtering and output naming settings;
+3. a proper settings surface;
+4. richer rule-testing UX only if the compact matching controls prove insufficient.
 
 The goal is not literal desktop parity. Desktop-only interaction patterns should remain upstream-specific, while Android-specific safety and automation may intentionally exceed upstream behavior.
