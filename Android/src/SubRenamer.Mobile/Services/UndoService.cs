@@ -12,20 +12,31 @@ public sealed record UndoResult(
 
 public sealed class UndoService(SettingsStore settingsStore)
 {
-    // Match the proven destination-side concurrency used by Apply. Each file keeps
-    // its own verify-then-delete sequence; only independent files overlap.
-    private const int UndoConcurrency = 4;
+    // Undo is dominated by DocumentsProvider open/delete latency, not SHA work.
+    // Eight independent verify-then-delete chains keep the provider busy while
+    // remaining bounded; each individual file still preserves the strict
+    // open -> full SHA-256 -> close -> delete ordering.
+    private const int MaxUndoConcurrency = 8;
 
     public async Task<UndoResult> UndoLastAsync(
         IStorageFolder downloadRoot,
         UndoBatchRecord batch,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IStorageFolder? resolvedTarget = null)
     {
         var totalWatch = Stopwatch.StartNew();
+        var concurrency = Math.Min(MaxUndoConcurrency, Math.Max(1, batch.Files.Count));
 
+        // Same-session undo can reuse the exact target folder handle kept by the
+        // current plan. Persisted undo after app restart has no live handle and
+        // safely falls back to resolving the stored relative path from Download.
         var resolveWatch = Stopwatch.StartNew();
-        var target = await StorageAccessService.ResolveRelativeFolderAsync(
-            downloadRoot, batch.TargetRelativePath, cancellationToken);
+        var target = resolvedTarget;
+        if (target is null)
+        {
+            target = await StorageAccessService.ResolveRelativeFolderAsync(
+                downloadRoot, batch.TargetRelativePath, cancellationToken);
+        }
         resolveWatch.Stop();
 
         if (target is null)
@@ -45,7 +56,7 @@ public sealed class UndoService(SettingsStore settingsStore)
                     TimeSpan.Zero,
                     totalWatch.Elapsed,
                     0,
-                    UndoConcurrency));
+                    concurrency));
         }
 
         // One SAF enumeration for the whole batch. Individual files are then
@@ -54,7 +65,7 @@ public sealed class UndoService(SettingsStore settingsStore)
         var files = await StorageAccessService.SnapshotChildFilesAsync(target, cancellationToken);
         snapshotWatch.Stop();
 
-        using var gate = new SemaphoreSlim(UndoConcurrency);
+        using var gate = new SemaphoreSlim(concurrency);
         var tasks = batch.Files.Select(async record =>
         {
             if (!files.TryGetValue(record.DestinationName, out var file))
@@ -180,7 +191,7 @@ public sealed class UndoService(SettingsStore settingsStore)
                 journalWatch.Elapsed,
                 totalWatch.Elapsed,
                 bytesHashed,
-                UndoConcurrency));
+                concurrency));
     }
 
     private enum UndoFileState
