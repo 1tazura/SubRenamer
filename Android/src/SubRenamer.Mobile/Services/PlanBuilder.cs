@@ -7,12 +7,13 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
     public async Task<MatchPlan> BuildAsync(
         SubtitleSource source,
         VideoTarget target,
+        CoreMatchSettings? matchSettings = null,
         CancellationToken cancellationToken = default)
     {
         var videoNames = target.Videos.Select(x => x.Name).ToArray();
         var subtitleNames = source.Entries.Select(x => x.DisplayName).ToArray();
 
-        var rows = await bridge.MatchAsync(videoNames, subtitleNames, cancellationToken);
+        var rows = await bridge.MatchAsync(videoNames, subtitleNames, matchSettings, cancellationToken);
         var diagnostics = new List<string>();
 
         var matched = rows
