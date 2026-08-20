@@ -23,6 +23,11 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
             .GroupBy(x => x.DisplayName, StringComparer.Ordinal)
             .ToDictionary(x => x.Key, x => x.ToArray(), StringComparer.Ordinal);
 
+        // SAF directory enumeration is an IPC/query on Android. Snapshot once rather
+        // than running a full folder query for every planned subtitle destination.
+        var existingNames = await StorageAccessService.SnapshotChildFileNamesAsync(
+            target.Folder, cancellationToken);
+
         var items = new List<MatchPlanItem>();
 
         foreach (var videoGroup in matched.GroupBy(x => x.Video, StringComparer.Ordinal))
@@ -73,15 +78,15 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
                     continue;
                 }
 
-                var existing = await StorageAccessService.FindChildFileAsync(target.Folder, destination, cancellationToken);
+                var exists = existingNames.Contains(destination);
                 items.Add(new MatchPlanItem(
                     row.Key,
                     row.Video,
                     entry.Key,
                     entry.DisplayName,
                     destination,
-                    existing is null ? PlanItemStatus.Ready : PlanItemStatus.ExistingDestination,
-                    existing is null ? null : "目标字幕已存在；v1 不覆盖。"));
+                    exists ? PlanItemStatus.ExistingDestination : PlanItemStatus.Ready,
+                    exists ? "目标字幕已存在；v1 不覆盖。" : null));
             }
         }
 
