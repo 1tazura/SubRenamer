@@ -85,12 +85,20 @@ public sealed class ArchiveService
         private readonly Stream _input;
         private readonly IArchive _archive;
         private readonly string? _tempPath;
+        private readonly Dictionary<string, IArchiveEntry> _entriesByKey;
 
         internal ArchiveSession(Stream input, IArchive archive, string? tempPath)
         {
             _input = input;
             _archive = archive;
             _tempPath = tempPath;
+            _entriesByKey = new Dictionary<string, IArchiveEntry>(StringComparer.Ordinal);
+
+            foreach (var entry in archive.Entries)
+            {
+                if (!entry.IsDirectory && !string.IsNullOrEmpty(entry.Key))
+                    _entriesByKey.TryAdd(entry.Key!, entry);
+            }
         }
 
         public IEnumerable<IArchiveEntry> Entries => _archive.Entries;
@@ -100,10 +108,7 @@ public sealed class ArchiveService
             Stream destination,
             CancellationToken cancellationToken = default)
         {
-            var entry = _archive.Entries.FirstOrDefault(x =>
-                !x.IsDirectory && string.Equals(x.Key, entryKey, StringComparison.Ordinal));
-
-            if (entry is null)
+            if (!_entriesByKey.TryGetValue(entryKey, out var entry))
                 throw new FileNotFoundException($"Archive entry was not found: {entryKey}");
 
             using var source = entry.OpenEntryStream();
