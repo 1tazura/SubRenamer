@@ -9,8 +9,8 @@ The Android documentation is split by responsibility so that the top-level `Andr
 | [`FEATURES.md`](FEATURES.md) | upstream desktop vs Android feature inventory | a feature is added, removed, or deliberately rejected |
 | [`ROADMAP.md`](ROADMAP.md) | prioritized remaining Android work | priorities or intended scope change |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | storage, matching, safety, performance and undo boundaries | an invariant or internal responsibility changes |
-| [`ARCHIVE_INDEX_CACHE.md`](ARCHIVE_INDEX_CACHE.md) | eager archive validation cache, stable rejection, invalidation and scan counters | archive caching or revalidation semantics change |
-| [`PROCESSING_PERFORMANCE.md`](PROCESSING_PERFORMANCE.md) | apply/write timing phases and low-risk processing optimizations | subtitle placement performance behavior changes |
+| [`ARCHIVE_INDEX_CACHE.md`](ARCHIVE_INDEX_CACHE.md) | eager archive validation cache, invalidation and scan counters | archive caching or revalidation semantics change |
+| [`PROCESSING_PERFORMANCE.md`](PROCESSING_PERFORMANCE.md) | apply-stage profiling, measured bottlenecks and safe I/O optimizations | subtitle placement performance or write-pipeline semantics change |
 | [`WORKFLOW.md`](WORKFLOW.md) | concrete end-to-end example | the storage/user flow changes |
 | [`VALIDATION.md`](VALIDATION.md) | CI, APK and real-device validation contract | build/test/package guarantees change |
 
