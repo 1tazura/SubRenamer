@@ -1,7 +1,16 @@
+using System.Diagnostics;
 using Avalonia.Platform.Storage;
 using SubRenamer.Mobile.Models;
 
 namespace SubRenamer.Mobile.Services;
+
+public sealed record SubtitleSourceScanResult(
+    IReadOnlyList<SubtitleSource> Sources,
+    TimeSpan RootEnumerationElapsed,
+    TimeSpan ArchiveIndexElapsed,
+    TimeSpan FinalizeElapsed,
+    int ArchiveCount,
+    int LooseSubtitleCount);
 
 public sealed class ScanService(ArchiveService archiveService)
 {
@@ -97,10 +106,16 @@ public sealed class ScanService(ArchiveService archiveService)
     public async Task<IReadOnlyList<SubtitleSource>> FindSubtitleSourcesAsync(
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken = default)
+        => (await FindSubtitleSourcesWithMetricsAsync(downloadRoot, cancellationToken)).Sources;
+
+    public async Task<SubtitleSourceScanResult> FindSubtitleSourcesWithMetricsAsync(
+        IStorageFolder downloadRoot,
+        CancellationToken cancellationToken = default)
     {
         var archives = new List<IStorageFile>();
         var loose = new List<IStorageFile>();
 
+        var rootWatch = Stopwatch.StartNew();
         await foreach (var item in downloadRoot.GetItemsAsync().WithCancellation(cancellationToken))
         {
             if (item is not IStorageFile file)
@@ -112,12 +127,14 @@ public sealed class ScanService(ArchiveService archiveService)
             else if (SubtitleExtensions.Contains(ext))
                 loose.Add(file);
         }
+        rootWatch.Stop();
 
         var sources = new List<SubtitleSource>();
         var orderedArchives = archives
             .OrderByDescending(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        var archiveWatch = Stopwatch.StartNew();
         if (orderedArchives.Length > 0)
         {
             var indexed = new SubtitleSource?[orderedArchives.Length];
@@ -155,7 +172,9 @@ public sealed class ScanService(ArchiveService archiveService)
             await Task.WhenAll(tasks);
             sources.AddRange(indexed.OfType<SubtitleSource>());
         }
+        archiveWatch.Stop();
 
+        var finalizeWatch = Stopwatch.StartNew();
         foreach (var group in loose.GroupBy(x => FilenameHeuristics.LooseClusterKey(x.Name)))
         {
             var files = group.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToArray();
@@ -172,12 +191,18 @@ public sealed class ScanService(ArchiveService archiveService)
                 files,
                 entries));
         }
+        finalizeWatch.Stop();
 
-        return sources.ToArray();
+        return new SubtitleSourceScanResult(
+            sources.ToArray(),
+            rootWatch.Elapsed,
+            archiveWatch.Elapsed,
+            finalizeWatch.Elapsed,
+            orderedArchives.Length,
+            loose.Count);
     }
 
     private sealed record FolderWork(IStorageFolder Folder, string RelativePath, int Depth);
-
     private sealed record FolderSnapshot(
         FolderWork Work,
         IReadOnlyList<IStorageFile> Videos,
