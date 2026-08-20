@@ -128,7 +128,7 @@ public sealed class UndoService(SettingsStore settingsStore)
                 }
                 catch (Exception ex)
                 {
-                    return UndoFileResult.Error(
+                    return UndoFileResult.Failed(
                         record.DestinationName,
                         ex.Message,
                         openElapsed,
@@ -218,7 +218,7 @@ public sealed class UndoService(SettingsStore settingsStore)
             long bytes)
             => new(name, UndoFileState.Changed, null, open, hash, TimeSpan.Zero, bytes);
 
-        public static UndoFileResult Error(
+        public static UndoFileResult Failed(
             string name,
             string error,
             TimeSpan open,
