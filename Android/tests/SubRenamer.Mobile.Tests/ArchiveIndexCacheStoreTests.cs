@@ -27,7 +27,7 @@ public sealed class ArchiveIndexCacheStoreTests
     }
 
     [Test]
-    public async Task Positive_and_negative_entries_round_trip()
+    public async Task Positive_negative_and_stable_rejection_entries_round_trip()
     {
         var store = new ArchiveIndexCacheStore(_cachePath);
         var positive = new ArchiveIndexCacheRecord(
@@ -40,13 +40,22 @@ public sealed class ArchiveIndexCacheStoreTests
             789,
             987,
             []);
+        var rejected = new ArchiveIndexCacheRecord(
+            "content://provider/document/rejected.zip",
+            111,
+            222,
+            [],
+            "ArchiveOperationException: Cannot determine compressed stream type.");
 
-        await store.SaveAsync([positive, negative]);
+        await store.SaveAsync([positive, negative, rejected]);
         var loaded = await store.LoadAsync();
 
-        Assert.That(loaded, Has.Count.EqualTo(2));
+        Assert.That(loaded, Has.Count.EqualTo(3));
         Assert.That(loaded[positive.Identity].Entries, Has.Length.EqualTo(1));
         Assert.That(loaded[negative.Identity].Entries, Is.Empty);
+        Assert.That(loaded[negative.Identity].IsStableRejection, Is.False);
+        Assert.That(loaded[rejected.Identity].IsStableRejection, Is.True);
+        Assert.That(loaded[rejected.Identity].StableRejectionError, Does.Contain("Cannot determine"));
     }
 
     [Test]
@@ -93,26 +102,50 @@ public sealed class ArchiveIndexCacheStoreTests
     [Test]
     public void Archive_scan_count_text_includes_cache_hit_and_reindex_counts()
     {
-        var summary = new ArchiveScanCount(25, 20, 5, []).ToString();
+        var summary = new ArchiveScanCount(25, 20, 5, [], 0, []).ToString();
 
         Assert.That(summary, Does.Contain("共 25 包"));
         Assert.That(summary, Does.Contain("缓存命中 20 包"));
         Assert.That(summary, Does.Contain("成功重索引 5"));
         Assert.That(summary, Does.Not.Contain("索引失败"));
+        Assert.That(summary, Does.Not.Contain("稳定排除"));
     }
 
     [Test]
-    public void Archive_scan_count_reports_failed_archive_name_and_error()
+    public void Archive_scan_count_reports_stable_rejection_separately_from_transient_failure()
     {
-        var failure = new ArchiveScanFailure(
-            "broken-pack.rar",
-            "InvalidOperationException: encrypted archive");
-        var summary = new ArchiveScanCount(25, 24, 0, [failure]).ToString();
+        var rejected = new ArchiveScanFailure(
+            "not-really-a-zip.zip",
+            "ArchiveOperationException: Cannot determine compressed stream type.");
+        var failed = new ArchiveScanFailure(
+            "temporary.rar",
+            "IOException: provider temporarily unavailable");
+        var count = new ArchiveScanCount(25, 22, 1, [rejected], 1, [failed]);
+        var summary = count.ToString();
 
+        Assert.That(count.Accounted, Is.EqualTo(25));
+        Assert.That(summary, Does.Contain("稳定排除 1 包（缓存 1）"));
+        Assert.That(summary, Does.Contain("not-really-a-zip.zip"));
         Assert.That(summary, Does.Contain("索引失败 1 包"));
-        Assert.That(summary, Does.Contain("broken-pack.rar"));
-        Assert.That(summary, Does.Contain("InvalidOperationException"));
-        Assert.That(summary, Does.Contain("成功重索引 0"));
+        Assert.That(summary, Does.Contain("temporary.rar"));
+        Assert.That(summary, Does.Contain("成功重索引 1"));
+    }
+
+    [Test]
+    public void Only_known_unsupported_stream_error_is_stable()
+    {
+        Assert.That(
+            ArchiveRejectionPolicy.IsStable(
+                "ArchiveOperationException",
+                "Cannot determine compressed stream type. Supported Archive Formats: Zip, Rar, Tar, GZip, 7Zip"),
+            Is.True);
+
+        Assert.That(
+            ArchiveRejectionPolicy.IsStable("IOException", "Cannot determine compressed stream type."),
+            Is.False);
+        Assert.That(
+            ArchiveRejectionPolicy.IsStable("ArchiveOperationException", "Unexpected end of stream"),
+            Is.False);
     }
 
     [Test]
