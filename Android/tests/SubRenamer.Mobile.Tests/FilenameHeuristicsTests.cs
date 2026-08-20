@@ -16,4 +16,14 @@ public sealed class FilenameHeuristicsTests
 
         Assert.That(numbers, Is.EquivalentTo(new[] { 1, 2, 3 }));
     }
+
+    [TestCase("[Sakurato] Mushoku Tensei S2 [00][CHS].ass", "chs")]
+    [TestCase("[Sakurato] Mushoku Tensei S2 [00][CHT].ass", "cht")]
+    [TestCase("[Sakurato] Mushoku Tensei S2 [01][CHS].Delay 1s (1000ms).ass", "chs")]
+    [TestCase("Title.zh-Hant.ass", "cht")]
+    [TestCase("Title (ENG).srt", "en")]
+    public void Language_tags_accept_common_group_delimiters(string fileName, string expected)
+    {
+        Assert.That(FilenameHeuristics.LanguageTag(fileName), Is.EqualTo(expected));
+    }
 }
