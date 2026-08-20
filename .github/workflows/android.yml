@@ -88,14 +88,21 @@ jobs:
           path: Android/mobile-test.log
           if-no-files-found: warn
 
-      - name: Build arm64 debug-signed APK
+      - name: Clean Android publish intermediates
+        shell: bash
+        run: |
+          find Android/src -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
+          mkdir -p artifacts
+
+      - name: Publish arm64 debug-signed APK
         shell: bash
         env:
           SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
         run: |
-          set -o pipefail
-          dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
-            -c Debug -f net10.0-android -t:SignAndroidPackage \
+          set -euo pipefail
+          dotnet publish Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+            -c Debug -f net10.0-android -r android-arm64 \
+            -p:AndroidPackageFormat=apk \
             -p:EmbedAssembliesIntoApk=true \
             -p:RunAOTCompilation=false \
             -p:AndroidEnableProfiledAot=false \
@@ -106,14 +113,23 @@ jobs:
             -p:AndroidSigningKeyPass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
             --verbosity normal 2>&1 | tee Android/android-debug-build.log
 
-      - name: Build arm64 release-trimmed candidate APK
+          debug_apk="$(find Android/src/SubRenamer.Mobile.Android/bin/Debug -type f -name '*-Signed.apk' -print -quit)"
+          test -n "$debug_apk"
+          cp "$debug_apk" artifacts/SubRenamer-Android-arm64-debug.apk
+
+      - name: Clean before release candidate
+        shell: bash
+        run: find Android/src -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
+
+      - name: Publish arm64 release-trimmed candidate APK
         shell: bash
         env:
           SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
         run: |
-          set -o pipefail
-          dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
-            -c Release -f net10.0-android -t:SignAndroidPackage \
+          set -euo pipefail
+          dotnet publish Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+            -c Release -f net10.0-android -r android-arm64 \
+            -p:AndroidPackageFormat=apk \
             -p:EmbedAssembliesIntoApk=true \
             -p:PublishTrimmed=true \
             -p:TrimMode=partial \
@@ -126,6 +142,10 @@ jobs:
             -p:AndroidSigningKeyPass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
             --verbosity normal 2>&1 | tee Android/android-release-build.log
 
+          release_apk="$(find Android/src/SubRenamer.Mobile.Android/bin/Release -type f -name '*-Signed.apk' -print -quit)"
+          test -n "$release_apk"
+          cp "$release_apk" artifacts/SubRenamer-Android-arm64-release-trimmed.apk
+
       - name: Upload Android build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -136,24 +156,15 @@ jobs:
             Android/android-release-build.log
           if-no-files-found: warn
 
-      - name: Collect, compare and verify APKs
+      - name: Compare and verify APKs
         shell: bash
         env:
           SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
         run: |
           set -euo pipefail
-          mkdir -p artifacts
 
-          debug_apk="$(find Android/src/SubRenamer.Mobile.Android/bin/Debug -type f -name '*-Signed.apk' -print -quit)"
-          release_apk="$(find Android/src/SubRenamer.Mobile.Android/bin/Release -type f -name '*-Signed.apk' -print -quit)"
-          test -n "$debug_apk"
-          test -n "$release_apk"
-
-          cp "$debug_apk" artifacts/SubRenamer-Android-arm64-debug.apk
-          cp "$release_apk" artifacts/SubRenamer-Android-arm64-release-trimmed.apk
-
-          unzip -Z1 "$debug_apk" > artifacts/apk-contents-debug.txt
-          unzip -Z1 "$release_apk" > artifacts/apk-contents-release.txt
+          unzip -Z1 artifacts/SubRenamer-Android-arm64-debug.apk > artifacts/apk-contents-debug.txt
+          unzip -Z1 artifacts/SubRenamer-Android-arm64-release-trimmed.apk > artifacts/apk-contents-release.txt
 
           for listing in artifacts/apk-contents-debug.txt artifacts/apk-contents-release.txt; do
             grep -q '^lib/arm64-v8a/' "$listing"
