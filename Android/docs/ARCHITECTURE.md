@@ -22,20 +22,16 @@ This matters because torrent directory boundaries are semantically meaningful an
 
 Folder enumeration uses **small bounded concurrency** to hide provider/storage latency without flooding Android `DocumentsProvider` with unbounded cursors/queries. Names discovered during enumeration are reused rather than repeatedly querying Android metadata.
 
-## 3. Subtitle-source discovery and lazy archive indexing
+## 3. Subtitle-source discovery
 
-Only direct children of `Download` are considered subtitle-source candidates in the current workflow:
+Only direct children of `Download` are treated as subtitle sources in the current workflow:
 
-- `zip`, `7z`, and `rar` files are discovered by filename during the initial scan but are **not all opened immediately**;
+- each `zip`, `7z`, or `rar` containing subtitle entries is one archive source;
 - loose subtitle files are grouped conservatively by normalized filename signature.
 
-Archive candidates start as unindexed sources. Their archive filename can still provide first-pass work-attribution evidence, but package-internal filename evidence is unavailable until that source is selected.
+Archive indexing also uses bounded concurrency. SharpCompress handles archive formats. The current eager archive indexing remains measurable separately so it can be replaced by lazy indexing if it remains a significant cost after SAF name-query removal.
 
-When the user selects one archive source, Android opens **only that archive**, lists its supported subtitle entries, marks the source indexed, and reruns work attribution using the stronger package-internal evidence. If the archive contains no supported subtitle entries it is reported as such rather than entering episode matching.
-
-This lazy model prevents a routine scan from opening every archive in a large `Download` directory. Indexed contents remain attached to the in-memory source card for the current scan/session, so rebuilding that source's preview does not reopen the archive merely to list entries.
-
-SharpCompress handles archive formats. If a SAF source stream is not seekable, the selected archive may be spooled to **app-private temporary storage** solely to provide a seekable stream. Nothing temporary is created inside the torrent directory.
+If a SAF source stream is not seekable, the archive may be spooled to **app-private temporary storage** solely to provide a seekable stream. Nothing temporary is created inside the torrent directory.
 
 ## 4. Work-level attribution
 
@@ -50,8 +46,6 @@ Evidence includes:
 - source/archive filename tokens vs torrent-directory title tokens;
 - common archive-entry tokens vs video filename tokens;
 - episode-set overlap at low weight only.
-
-For an unindexed archive, only evidence available without opening the archive is used. After that archive is selected and indexed, attribution is recomputed with its internal subtitle filenames.
 
 Episode overlap alone is never enough to establish a work relationship.
 
@@ -135,9 +129,8 @@ The main screen currently orchestrates:
 
 ```text
 authorize Download
-  -> scan video targets + lightweight source candidates
-  -> select/index one archive source when needed
-  -> confirm source-to-target attribution
+  -> scan targets/sources
+  -> choose source and target attribution
   -> choose Diff / Manual / Regex episode matching
   -> build Core preview
   -> apply subtitle outputs

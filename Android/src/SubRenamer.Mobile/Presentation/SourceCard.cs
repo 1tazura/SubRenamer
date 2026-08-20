@@ -6,34 +6,11 @@ namespace SubRenamer.Mobile.Presentation;
 
 public sealed class SourceCard : INotifyPropertyChanged
 {
-    private SubtitleSource _source = null!;
-    private IReadOnlyList<AttributionCandidate> _candidates = [];
     private AttributionCandidate? _selectedCandidate;
     private string _state = "待处理";
 
-    public required SubtitleSource Source
-    {
-        get => _source;
-        set
-        {
-            if (Equals(_source, value)) return;
-            _source = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(Summary));
-        }
-    }
-
-    public required IReadOnlyList<AttributionCandidate> Candidates
-    {
-        get => _candidates;
-        set
-        {
-            if (ReferenceEquals(_candidates, value)) return;
-            _candidates = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(Summary));
-        }
-    }
+    public required SubtitleSource Source { get; init; }
+    public required IReadOnlyList<AttributionCandidate> Candidates { get; init; }
 
     public AttributionCandidate? SelectedCandidate
     {
@@ -59,27 +36,10 @@ public sealed class SourceCard : INotifyPropertyChanged
         }
     }
 
-    public string Summary
-    {
-        get
-        {
-            string sourceInfo;
-            if (Source.Kind == SubtitleSourceKind.Archive && !Source.IsIndexed)
-            {
-                sourceInfo = Source.DiscoveryAffinity > 0
-                    ? "疑似相关压缩包 · 未读取内容"
-                    : "其他压缩包 · 未检查内容";
-            }
-            else
-            {
-                sourceInfo = $"{Source.SubtitleCount} 字幕";
-            }
-
-            return $"{Source.DisplayName}\n{sourceInfo} · " +
-                   (SelectedCandidate is null ? "需要选择目标" : $"→ {SelectedCandidate.Target.RelativePath}") +
-                   $" · {State}";
-        }
-    }
+    public string Summary =>
+        $"{Source.DisplayName}\n{Source.SubtitleCount} 字幕 · " +
+        (SelectedCandidate is null ? "需要选择目标" : $"→ {SelectedCandidate.Target.RelativePath}") +
+        $" · {State}";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
