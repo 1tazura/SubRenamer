@@ -28,7 +28,7 @@
                 Margin="0,8,0,0"
                 HorizontalContentAlignment="Center"
                 Content="扫描字幕与视频"
-                Click="Scan_Click"
+                Click="ScanOptimized_Click"
                 IsEnabled="False"/>
       </Grid>
     </StackPanel>
@@ -112,7 +112,7 @@
                 HorizontalContentAlignment="Center"
                 FontWeight="SemiBold"
                 Content="确认处理"
-                Click="Apply_Click"
+                Click="ApplyInstrumented_Click"
                 IsEnabled="False"/>
 
         <Button x:Name="UndoButton"
