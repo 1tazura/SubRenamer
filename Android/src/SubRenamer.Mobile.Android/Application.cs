@@ -15,5 +15,5 @@ public class AndroidApplication : AvaloniaAndroidApplication<App>
     }
 
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder) =>
-        base.CustomizeAppBuilder(builder).WithInterFont();
+        base.CustomizeAppBuilder(builder);
 }
