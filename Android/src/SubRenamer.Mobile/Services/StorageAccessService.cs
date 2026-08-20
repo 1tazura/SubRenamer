@@ -86,4 +86,17 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
         }
         return null;
     }
+
+    public static async Task<HashSet<string>> SnapshotChildFileNamesAsync(
+        IStorageFolder parent,
+        CancellationToken cancellationToken = default)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var item in parent.GetItemsAsync().WithCancellation(cancellationToken))
+        {
+            if (item is IStorageFile file)
+                names.Add(file.Name);
+        }
+        return names;
+    }
 }
