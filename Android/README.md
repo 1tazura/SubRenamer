@@ -56,8 +56,8 @@ For implementation details, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 1. On first use, choose `/storage/emulated/0/Download` through the Android folder picker.
 2. Tap **扫描字幕与视频**.
 3. The app discovers physical torrent directories that directly contain video files.
-4. It discovers subtitle archives (`zip`, `7z`, `rar`) and loose subtitle files in the `Download` root.
-5. It ranks likely `subtitle source → torrent target` relationships.
+4. It discovers archive candidates (`zip`, `7z`, `rar`) and loose subtitle files in the `Download` root. Archive contents are **not all opened during this scan**.
+5. If several sources are present, select the subtitle source you want to process. Only the selected archive is opened/indexed; the app then reruns source → torrent attribution using its internal subtitle filenames.
 6. If attribution is not confident, select the correct torrent target manually.
 7. Choose an episode-matching mode:
    - **自动 (Diff)** — original Core diff/extract/mapping;
@@ -75,15 +75,16 @@ A concrete storage example is in [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 - SAF `Download` selection and bookmark restore.
 - Recursive torrent-target discovery without flattening directories.
-- Download-root subtitle discovery.
-- ZIP / 7z / RAR listing and extraction through SharpCompress.
-- Conservative work-level attribution with manual fallback.
+- Download-root subtitle/archive-candidate discovery.
+- Lazy ZIP / 7z / RAR indexing: only the selected archive is opened to list subtitle entries.
+- ZIP / 7z / RAR extraction through SharpCompress.
+- Conservative work-level attribution with manual fallback and post-index reranking.
 - Typed direct call into the original `SubRenamer.Core`.
 - Core automatic Diff, manual-rule and direct Regex matching modes.
 - One-to-many subtitle output with recognized language suffixes such as `chs` / `cht`.
 - Preview and no-overwrite conflict protection.
 - Background scanning / processing to avoid blocking the Android UI.
-- Bounded concurrent folder/archive scanning and reduced repeated SAF enumeration.
+- Bounded concurrent folder scanning and reduced repeated SAF metadata queries.
 - Safe one-level undo persisted across app restarts.
 - Original upstream tests plus Android integration tests and CI-built installable APK artifacts.
 
