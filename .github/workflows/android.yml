@@ -16,6 +16,13 @@ on:
       - 'SubRenamer.Tests/**'
       - '.github/workflows/android.yml'
 
+# Only the newest branch/PR build should establish or consume the debug-signing
+# cache. This also prevents several freshly queued commits from generating
+# different first-use debug keys before the cache has been saved.
+concurrency:
+  group: build-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -37,6 +44,32 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Restore stable debug signing keystore
+        id: debug-signing-cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-signing/subrenamer-debug.keystore
+          key: subrenamer-android-debug-signing-v1
+
+      - name: Create debug signing keystore on first use
+        if: steps.debug-signing-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-signing
+          keytool -genkeypair \
+            -keystore .ci-signing/subrenamer-debug.keystore \
+            -storetype PKCS12 \
+            -storepass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
+            -keypass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
+            -alias subrenamer-debug \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname 'CN=SubRenamer Android CI Debug,O=SubRenamer'
 
       - name: Run original SubRenamer tests
         run: dotnet test SubRenamer.Tests/SubRenamer.Tests.csproj -c Release --verbosity normal
@@ -60,9 +93,19 @@ jobs:
 
       - name: Build self-contained debug-signed APK
         shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
         run: |
           set -o pipefail
-          dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj -c Debug -f net10.0-android -t:SignAndroidPackage -p:EmbedAssembliesIntoApk=true --verbosity normal 2>&1 | tee Android/android-build.log
+          dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+            -c Debug -f net10.0-android -t:SignAndroidPackage \
+            -p:EmbedAssembliesIntoApk=true \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$GITHUB_WORKSPACE/.ci-signing/subrenamer-debug.keystore" \
+            -p:AndroidSigningStorePass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            -p:AndroidSigningKeyAlias=subrenamer-debug \
+            -p:AndroidSigningKeyPass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            --verbosity normal 2>&1 | tee Android/android-build.log
 
       - name: Upload Android build diagnostics
         if: failure()
@@ -74,6 +117,8 @@ jobs:
 
       - name: Collect and verify standalone APK
         shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -88,6 +133,11 @@ jobs:
           grep -Fxq 'lib/arm64-v8a/lib_SubRenamer.Mobile.dll.so' artifacts/apk-contents.txt
           grep -Fxq 'lib/arm64-v8a/lib_SubRenamer.Core.dll.so' artifacts/apk-contents.txt
 
+          keytool -list -v \
+            -keystore .ci-signing/subrenamer-debug.keystore \
+            -storepass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
+            -alias subrenamer-debug > artifacts/debug-signing-certificate.txt
+
           cp "$signed_apk" artifacts/SubRenamer-Android-debug-signed.apk
 
       - name: Upload APK artifact
@@ -97,4 +147,5 @@ jobs:
           path: |
             artifacts/SubRenamer-Android-debug-signed.apk
             artifacts/apk-contents.txt
+            artifacts/debug-signing-certificate.txt
           if-no-files-found: error
