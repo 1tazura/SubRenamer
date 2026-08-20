@@ -15,7 +15,6 @@ public sealed record SubtitleSourceScanResult(
 public sealed class ScanService(ArchiveService archiveService)
 {
     private const int FolderScanConcurrency = 4;
-    private const int ArchiveScanConcurrency = 2;
 
     public static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -141,43 +140,20 @@ public sealed class ScanService(ArchiveService archiveService)
             .OrderByDescending(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        // Do not eagerly open every archive in Download. On Android this made a
+        // routine source scan scale with all archive contents, even when the user
+        // intended to process only one subtitle pack. Archive contents are indexed
+        // on first selection via IndexArchiveSourceAsync.
         var archiveWatch = Stopwatch.StartNew();
-        if (orderedArchives.Length > 0)
+        foreach (var archive in orderedArchives)
         {
-            var indexed = new SubtitleSource?[orderedArchives.Length];
-            using var gate = new SemaphoreSlim(ArchiveScanConcurrency);
-
-            var tasks = orderedArchives.Select(async (archive, index) =>
-            {
-                await gate.WaitAsync(cancellationToken);
-                try
-                {
-                    var entries = await archiveService.ListSubtitleEntriesAsync(archive.File, cancellationToken);
-                    if (entries.Count == 0)
-                        return;
-
-                    indexed[index] = new SubtitleSource(
-                        SubtitleSourceKind.Archive,
-                        archive.Name,
-                        archive.File,
-                        [],
-                        entries);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch
-                {
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            });
-
-            await Task.WhenAll(tasks);
-            sources.AddRange(indexed.OfType<SubtitleSource>());
+            sources.Add(new SubtitleSource(
+                SubtitleSourceKind.Archive,
+                archive.Name,
+                archive.File,
+                [],
+                [],
+                IsIndexed: false));
         }
         archiveWatch.Stop();
 
@@ -207,6 +183,24 @@ public sealed class ScanService(ArchiveService archiveService)
             finalizeWatch.Elapsed,
             orderedArchives.Length,
             loose.Count);
+    }
+
+    public async Task<SubtitleSource> IndexArchiveSourceAsync(
+        SubtitleSource source,
+        CancellationToken cancellationToken = default)
+    {
+        if (source.Kind != SubtitleSourceKind.Archive || source.IsIndexed)
+            return source;
+
+        if (source.ArchiveFile is null)
+            throw new InvalidOperationException("Archive source has no archive file.");
+
+        var entries = await archiveService.ListSubtitleEntriesAsync(source.ArchiveFile, cancellationToken);
+        return source with
+        {
+            Entries = entries,
+            IsIndexed = true,
+        };
     }
 
     private sealed record NamedFile(IStorageFile File, string Name);
