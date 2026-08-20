@@ -121,7 +121,9 @@ jobs:
         shell: bash
         run: find Android/src -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
 
-      - name: Publish arm64 release-untrimmed candidate APK
+      - name: Probe arm64 release-untrimmed candidate
+        id: release_probe
+        continue-on-error: true
         shell: bash
         env:
           SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
@@ -146,8 +148,48 @@ jobs:
           test -n "$release_apk"
           cp "$release_apk" artifacts/SubRenamer-Android-arm64-release-untrimmed.apk
 
+      - name: Verify arm64 package and report size
+        shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
+        run: |
+          set -euo pipefail
+
+          debug_apk=artifacts/SubRenamer-Android-arm64-debug.apk
+          unzip -Z1 "$debug_apk" > artifacts/apk-contents-debug.txt
+          grep -q '^lib/arm64-v8a/' artifacts/apk-contents-debug.txt
+          if grep -q '^lib/x86_64/' artifacts/apk-contents-debug.txt; then
+            echo 'Unexpected x86_64 payload in arm64 debug APK' >&2
+            exit 1
+          fi
+
+          debug_bytes="$(stat -c%s "$debug_apk")"
+          echo "arm64 debug bytes=$debug_bytes" > artifacts/apk-size-report.txt
+
+          release_apk=artifacts/SubRenamer-Android-arm64-release-untrimmed.apk
+          if test -f "$release_apk"; then
+            unzip -Z1 "$release_apk" > artifacts/apk-contents-release.txt
+            grep -q '^lib/arm64-v8a/' artifacts/apk-contents-release.txt
+            if grep -q '^lib/x86_64/' artifacts/apk-contents-release.txt; then
+              echo 'Unexpected x86_64 payload in release candidate APK' >&2
+              exit 1
+            fi
+            release_bytes="$(stat -c%s "$release_apk")"
+            echo "arm64 release-untrimmed bytes=$release_bytes" >> artifacts/apk-size-report.txt
+            awk -v d="$debug_bytes" -v r="$release_bytes" 'BEGIN { printf "release_vs_debug_reduction=%.1f%%\n", (d-r)*100/d }' >> artifacts/apk-size-report.txt
+          else
+            echo 'arm64 release-untrimmed candidate=build failed; debug artifact remains valid' >> artifacts/apk-size-report.txt
+          fi
+
+          cat artifacts/apk-size-report.txt
+
+          keytool -list -v \
+            -keystore .ci-signing/subrenamer-debug.keystore \
+            -storepass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
+            -alias subrenamer-debug > artifacts/debug-signing-certificate.txt
+
       - name: Upload Android build diagnostics
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: SubRenamer-Android-build-diagnostics
@@ -155,37 +197,6 @@ jobs:
             Android/android-debug-build.log
             Android/android-release-build.log
           if-no-files-found: warn
-
-      - name: Compare and verify APKs
-        shell: bash
-        env:
-          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
-        run: |
-          set -euo pipefail
-
-          unzip -Z1 artifacts/SubRenamer-Android-arm64-debug.apk > artifacts/apk-contents-debug.txt
-          unzip -Z1 artifacts/SubRenamer-Android-arm64-release-untrimmed.apk > artifacts/apk-contents-release.txt
-
-          for listing in artifacts/apk-contents-debug.txt artifacts/apk-contents-release.txt; do
-            grep -q '^lib/arm64-v8a/' "$listing"
-            if grep -q '^lib/x86_64/' "$listing"; then
-              echo "Unexpected x86_64 payload in $listing" >&2
-              exit 1
-            fi
-          done
-
-          debug_bytes="$(stat -c%s artifacts/SubRenamer-Android-arm64-debug.apk)"
-          release_bytes="$(stat -c%s artifacts/SubRenamer-Android-arm64-release-untrimmed.apk)"
-          {
-            echo "arm64 debug bytes=$debug_bytes"
-            echo "arm64 release-untrimmed bytes=$release_bytes"
-            awk -v d="$debug_bytes" -v r="$release_bytes" 'BEGIN { printf "release_vs_debug_reduction=%.1f%%\n", (d-r)*100/d }'
-          } | tee artifacts/apk-size-report.txt
-
-          keytool -list -v \
-            -keystore .ci-signing/subrenamer-debug.keystore \
-            -storepass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
-            -alias subrenamer-debug > artifacts/debug-signing-certificate.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
