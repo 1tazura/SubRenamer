@@ -4,8 +4,8 @@
     <TargetFramework>net10.0-android</TargetFramework>
     <SupportedOSPlatformVersion>23</SupportedOSPlatformVersion>
     <ApplicationId>io.github.subrenamer.mobile</ApplicationId>
-    <ApplicationVersion>10</ApplicationVersion>
-    <ApplicationDisplayVersion>0.1.9</ApplicationDisplayVersion>
+    <ApplicationVersion>11</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.10</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <AndroidUseLatestPlatformSdk>true</AndroidUseLatestPlatformSdk>
