@@ -6,6 +6,8 @@ namespace SubRenamer.Mobile.Services;
 
 public sealed class ArchiveService
 {
+    private const int StagingBufferSize = 256 * 1024;
+
     public static readonly HashSet<string> ArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".zip", ".7z", ".rar"
@@ -58,7 +60,7 @@ public sealed class ArchiveService
             await using (source)
             await using (var target = File.Create(temp))
             {
-                await source.CopyToAsync(target, cancellationToken);
+                await source.CopyToAsync(target, StagingBufferSize, cancellationToken);
             }
 
             var seekable = File.OpenRead(temp);
