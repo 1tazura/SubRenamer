@@ -4,12 +4,18 @@ using SubRenamer.Mobile.Models;
 
 namespace SubRenamer.Mobile.Services;
 
+public readonly record struct ArchiveScanCount(int Total, int CacheHits, int Reindexed)
+{
+    public override string ToString()
+        => $"共 {Total} 包，缓存命中 {CacheHits}，实际重索引 {Reindexed}";
+}
+
 public sealed record SubtitleSourceScanResult(
     IReadOnlyList<SubtitleSource> Sources,
     TimeSpan RootEnumerationElapsed,
     TimeSpan ArchiveIndexElapsed,
     TimeSpan FinalizeElapsed,
-    int ArchiveCount,
+    ArchiveScanCount ArchiveCount,
     int LooseSubtitleCount,
     int ArchiveCacheHits,
     int ArchiveValidated);
@@ -163,8 +169,7 @@ public sealed class ScanService(ArchiveService archiveService)
                     var signature = await TryGetArchiveSignatureAsync(archive.File, cancellationToken);
                     if (signature is not null &&
                         cache.TryGetValue(signature.Identity, out var cached) &&
-                        cached.Size == signature.Size &&
-                        cached.ModifiedUtcTicks == signature.ModifiedUtcTicks)
+                        cached.Matches(signature.Size, signature.ModifiedUtcTicks))
                     {
                         refreshedCache[index] = cached;
                         Interlocked.Increment(ref cacheHits);
@@ -256,7 +261,7 @@ public sealed class ScanService(ArchiveService archiveService)
             rootWatch.Elapsed,
             archiveWatch.Elapsed,
             finalizeWatch.Elapsed,
-            orderedArchives.Length,
+            new ArchiveScanCount(orderedArchives.Length, cacheHits, validated),
             loose.Count,
             cacheHits,
             validated);

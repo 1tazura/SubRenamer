@@ -21,9 +21,18 @@ public sealed record AppSettings(
 public sealed class SettingsStore
 {
     private readonly string _path;
+    private readonly ArchiveIndexCacheStore _archiveCache;
 
-    public SettingsStore()
+    public SettingsStore(string? path = null, ArchiveIndexCacheStore? archiveCache = null)
     {
+        _archiveCache = archiveCache ?? new ArchiveIndexCacheStore();
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            _path = path;
+            return;
+        }
+
         // Do not touch the filesystem while MainView is being constructed.
         // On Android, storage-backed special folders may not be ready until the
         // application/activity is fully initialized.
@@ -72,6 +81,15 @@ public sealed class SettingsStore
         CancellationToken cancellationToken = default)
     {
         var current = await LoadAsync(cancellationToken);
+        var changed = !string.Equals(current.DownloadBookmark, bookmark, StringComparison.Ordinal);
+
+        // Archive identities are SAF/provider-specific. A newly selected Download
+        // root must not inherit an index snapshot produced under an older root.
+        // Clearing is deliberately best-effort because the cache is only an
+        // optimization; the next scan will eagerly rebuild it.
+        if (changed)
+            await _archiveCache.ClearAsync(cancellationToken);
+
         // A newly selected SAF root may point at a different Download tree.
         // Never carry an undo journal across roots.
         await SaveAsync(current with

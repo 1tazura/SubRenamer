@@ -7,7 +7,11 @@ public sealed record ArchiveIndexCacheRecord(
     string Identity,
     ulong Size,
     long ModifiedUtcTicks,
-    SubtitleEntryRef[] Entries);
+    SubtitleEntryRef[] Entries)
+{
+    public bool Matches(ulong size, long modifiedUtcTicks)
+        => Size == size && ModifiedUtcTicks == modifiedUtcTicks;
+}
 
 /// <summary>
 /// Persists the result of a completed archive inspection.
@@ -21,8 +25,14 @@ public sealed class ArchiveIndexCacheStore
 {
     private readonly string _path;
 
-    public ArchiveIndexCacheStore()
+    public ArchiveIndexCacheStore(string? path = null)
     {
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            _path = path;
+            return;
+        }
+
         var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(baseDir))
             baseDir = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
@@ -106,5 +116,13 @@ public sealed class ArchiveIndexCacheStore
         {
             try { File.Delete(tempPath); } catch { }
         }
+    }
+
+    public Task ClearAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try { File.Delete(_path); } catch { }
+        try { File.Delete(_path + ".tmp"); } catch { }
+        return Task.CompletedTask;
     }
 }
