@@ -9,15 +9,12 @@
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <AndroidUseLatestPlatformSdk>true</AndroidUseLatestPlatformSdk>
-    <RuntimeIdentifier>android-arm64</RuntimeIdentifier>
     <RunAOTCompilation>false</RunAOTCompilation>
 
     <!--
-      The sideload target for this port is modern ARM64 Android hardware. A
-      single RuntimeIdentifier keeps restore/build/package on the same ABI and
-      avoids carrying a second x86_64 copy of the .NET/Avalonia runtime.
-      AOT stays disabled so the compact build preserves the current JIT runtime
-      behavior and remains cross-buildable on the x64 GitHub Actions runner.
+      Keep the project RID-neutral. CI publishes a physical-device package with
+      `dotnet publish -r android-arm64`; this is the supported single-RID path and
+      avoids embedding a second x86_64 copy of the .NET/Avalonia runtime.
     -->
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
   </PropertyGroup>
@@ -30,4 +27,14 @@
   <ItemGroup>
     <ProjectReference Include="..\SubRenamer.Mobile\SubRenamer.Mobile.csproj" />
   </ItemGroup>
+
+  <!--
+    .NET 10 Android currently has an incremental BuildArchive bug which can make
+    consecutive Avalonia publishes lose Java/JAR resources. Rebuilding the
+    intermediate APK from scratch is the upstream-verified workaround and has no
+    effect on application behavior or persistent user data.
+  -->
+  <Target Name="_SubRenamerCleanIntermediateApk" BeforeTargets="_BuildApkEmbed">
+    <Delete Files="$(ApkFileIntermediate)" Condition="Exists('$(ApkFileIntermediate)')" />
+  </Target>
 </Project>
