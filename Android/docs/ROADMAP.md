@@ -66,68 +66,105 @@ Create a real Android settings page instead of continuing to hard-code policy in
 
 ## P3 — performance and observability
 
-The first low-risk performance pass reduces repeated SAF enumeration, adds bounded folder/archive concurrency and indexes archive entries. Preview and scan timing are now visible on-device.
+The first low-risk performance pass reduced repeated SAF enumeration, added bounded folder/archive concurrency and made preview/scan timing visible on-device. Later passes added persistent archive indexing, real top-level overlap and apply-phase diagnostics.
 
-### Measured bottlenecks
+### Preview baseline
 
-On the 25-video / 50-subtitle test workload, preview work is already small:
+On the measured 25-video / 50-subtitle workload, preview work is already small:
 
 - Core Diff: roughly 20–80 ms;
-- target-folder snapshot: roughly 0.3 s;
-- total preview backend: roughly 0.6–0.8 s.
+- target-folder snapshot: roughly 0.07–0.3 s depending on run;
+- total preview backend: roughly 0.15–0.8 s.
 
-The original scan profile identified the real wall-clock problem:
+Preview is not currently a priority bottleneck.
 
-- Torrent traversal: roughly 1.9–2.0 s;
-- Download-root enumeration: roughly 9.0–9.6 s;
-- indexing 25 archives: roughly 3.7–4.2 s;
-- work attribution: roughly 0.7 s;
-- total scan: roughly 16.1 s.
+### Scan history
 
-### v0.1.12 SAF-name optimization
+The original scan profile was roughly:
 
-Avalonia Android `GetItemsAsync()` already returns a document id and MIME type in one cursor, but `IStorageItem.Name` performs another `ContentResolver` metadata query. Calling `.Name` for every item in a large `Download` directory turns one enumeration into hundreds of extra IPC/provider queries.
+- Torrent traversal: 1.9–2.0 s;
+- Download-root enumeration: 9.0–9.6 s;
+- indexing 25 archives: 3.7–4.2 s;
+- work attribution: about 0.7 s;
+- total: about 16.1 s.
+
+#### v0.1.12 SAF-name optimization
+
+Avalonia Android `GetItemsAsync()` already returns a document id and MIME type in one cursor, but `IStorageItem.Name` performs another `ContentResolver` metadata query. Calling `.Name` for every item in a large `Download` directory turned one enumeration into hundreds of extra IPC/provider queries.
 
 For Android's `com.android.externalstorage.documents` provider, the document id embedded in `IStorageItem.Path` already contains the item path/name. v0.1.12 derives the display name from that URI when possible and falls back to `IStorageItem.Name` for other providers/platforms.
 
-Real-device measurement reduced Download-root enumeration from roughly 9 seconds to roughly 1.1 seconds, and the full eager scan from roughly 16 seconds to roughly 6.5 seconds.
+Real-device measurement reduced Download-root enumeration from roughly 9 seconds to roughly 1.1 seconds and the full eager scan from roughly 16 seconds to roughly 6.5 seconds.
 
-This optimization is applied to:
-
-- Download-root source discovery;
-- Torrent folder/video discovery;
-- child-folder/file lookup and snapshots;
-- archive filename handling;
-- Core video-name input;
-- work attribution;
-- loose-subtitle lookup.
-
-### Archive-validation decision
+#### Archive-validation decision
 
 A later experiment deferred archive inspection until the user selected an archive. It reduced the initial scan to roughly 2.5 seconds, but it also meant arbitrary non-subtitle ZIP/7z/RAR files in `Download` had to appear as unverified candidates and weakened the automatic `source -> torrent target` workflow until the user made a manual source choice.
 
-That trade-off was rejected. The Android workflow intentionally restores **eager validation of archive contents during scanning**: only archives that actually contain supported subtitle entries become subtitle sources, and their internal filenames remain immediately available to automatic work attribution.
+That trade-off was rejected. The Android workflow intentionally keeps **eager validation of archive contents during scanning**: only archives that actually contain supported subtitle entries become subtitle sources, and their internal filenames remain immediately available to automatic work attribution.
 
-The extra few seconds are currently considered preferable to sacrificing automatic source discovery. Do not reintroduce lazy archive discovery merely to improve the headline scan time unless the automatic-selection semantics can be preserved.
+Do not reintroduce lazy archive discovery merely to improve the headline scan time unless the automatic-selection semantics can be preserved.
 
-### v0.1.17 validated archive-index cache
+#### v0.1.17–v0.1.18 archive-index cache
 
-Eager validation is retained, but a completed archive inspection is now cached persistently using the archive storage identity plus byte size and last-modified timestamp. The cached result includes both positive results (the real subtitle-entry list) and negative results (the archive was fully inspected and contained no supported subtitles).
+A completed archive inspection is cached persistently using storage identity + byte size + last-modified timestamp. Positive results store the complete real subtitle-entry list; negative results store the fact that a fully opened archive contained no supported subtitles. Missing metadata conservatively disables reuse.
 
-On later scans, an archive is reused only when all signature fields still match. New or changed archives are fully opened and validated exactly as before. If the current storage provider cannot supply both size and modification time, caching is disabled for that file and it is fully validated every time. Cache read/write failures are also treated as optimization failures only and never prevent a normal scan.
+On the measured device, v0.1.18 changed archive indexing from about 5303 ms on a cold scan to about 422 ms on an immediate warm scan. Total warm scan time was about 2797 ms.
 
-This preserves the same validated-source discovery and automatic attribution evidence while avoiding repeated archive parsing for unchanged files. The first scan after installing the version still pays the normal eager-validation cost; subsequent scans should primarily pay metadata checks plus full validation only for new/changed archives.
+#### v0.1.19 real top-level overlap
+
+The video-target and subtitle-source scan chains were moved onto independent workers. Real-device warm-scan measurement then showed:
+
+- Torrent branch: about 1465 ms;
+- Download root: about 1489 ms;
+- archive indexing: about 548 ms;
+- work attribution: about 77 ms;
+- total: about 2134 ms.
+
+The total closely matched `root/subtitle critical path + attribution` rather than the sum of both branches, confirming real overlap.
+
+The same run identified the previously unexplained 25th archive as an unrelated file named `支付宝交易明细(20251213-20260313).zip`, rejected by SharpCompress with `ArchiveOperationException: Cannot determine compressed stream type.`
+
+#### v0.1.20 scan cleanup
+
+The main scan now enumerates direct children of `Download` exactly once, capturing both the `Torrent` folder and direct subtitle/archive candidates. Torrent **subtree** traversal and archive indexing then run in parallel. This removes the two competing root enumerations observed in v0.1.19.
+
+The known deterministic unsupported-stream error can now be stored as a conservative stable rejection under the same identity/size/mtime signature. Unchanged non-archive bytes therefore are not reopened every warm scan. Transient errors remain uncached and are retried.
+
+See `ARCHIVE_INDEX_CACHE.md` for the exact policy.
+
+### Apply / processing performance
+
+As scanning approached roughly two seconds, the actual subtitle placement step became comparatively prominent. v0.1.20 therefore instruments the apply path rather than guessing at the next bottleneck.
+
+The UI reports cumulative time for:
+
+- target-directory no-overwrite recheck;
+- archive/source preparation;
+- destination creation;
+- destination open;
+- loose-source open;
+- transfer / archive decompression / SHA-256 / write;
+- destination close/commit;
+- undo-journal persistence;
+- full click-to-result wall time.
+
+Two low-risk changes are already included:
+
+- copy/hash and non-seekable archive staging use 256 KiB buffers to reduce provider/native calls;
+- redundant explicit `FlushAsync` immediately before output-stream disposal was removed; close/dispose remains the required commit boundary.
+
+No blind write concurrency or parallel extraction has been introduced. If real-device timings show `CreateFileAsync`/open/close dominates, bounded destination-side pipelining can be evaluated. If transfer/decompression dominates—especially on solid 7z sources—optimize the archive extraction strategy instead of increasing SAF concurrency.
+
+See `PROCESSING_PERFORMANCE.md`.
 
 ### Remaining performance work
 
-- Torrent traversal is now roughly 1.1 s on the measured device and is not urgent.
-- Measure first-scan versus warm-cache scan time with the 25-archive workload before attempting more archive concurrency or format-specific parsers.
-- identify whether SAF `CreateFileAsync` is the dominant apply bottleneck only after higher-value functionality work;
-- optimize solid 7z extraction as a batch/streaming operation if repeated random extraction proves expensive.
+- measure v0.1.20 warm scan after shared-root enumeration and cached stable rejection;
+- measure one representative real apply and use its phase breakdown to select the next optimization;
+- do not increase `ArchiveScanConcurrency` or output concurrency blindly;
+- investigate solid 7z batch/streaming extraction only if transfer/decompression is shown to dominate.
 
 The fixed `Download` / `Torrent` storage boundary remains useful. Do not shift routine folder-selection work back to the user solely for scan speed.
-
-Avoid increasing concurrency blindly; Android `DocumentsProvider` / storage backends can regress under excessive parallelism.
 
 ## P4 — operation history
 
