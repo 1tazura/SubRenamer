@@ -4,10 +4,49 @@ using SubRenamer.Mobile.Models;
 
 namespace SubRenamer.Mobile.Services;
 
-public readonly record struct ArchiveScanCount(int Total, int CacheHits, int Reindexed)
+public sealed record ArchiveScanFailure(string ArchiveName, string Error)
 {
+    public static ArchiveScanFailure FromException(string archiveName, Exception exception)
+    {
+        var message = exception.Message
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Trim();
+
+        if (message.Length > 180)
+            message = message[..177] + "...";
+
+        if (string.IsNullOrWhiteSpace(message))
+            message = "(no message)";
+
+        return new ArchiveScanFailure(
+            archiveName,
+            $"{exception.GetType().Name}: {message}");
+    }
+
+    public override string ToString() => $"{ArchiveName}: {Error}";
+}
+
+public sealed record ArchiveScanCount(
+    int Total,
+    int CacheHits,
+    int Reindexed,
+    IReadOnlyList<ArchiveScanFailure> Failures)
+{
+    public int Failed => Failures.Count;
+
     public override string ToString()
-        => $"共 {Total} 包，缓存命中 {CacheHits}，实际重索引 {Reindexed}";
+    {
+        var failureText = Failed == 0
+            ? ""
+            : $"，索引失败 {Failed} 包 [{string.Join(" | ", Failures.Take(3))}" +
+              (Failed > 3 ? $" | 另有 {Failed - 3} 包" : "") +
+              "]";
+
+        // MainView appends the final "包" after this formatted value, so keep
+        // the successful re-index count last.
+        return $"共 {Total} 包，缓存命中 {CacheHits} 包{failureText}，成功重索引 {Reindexed}";
+    }
 }
 
 public sealed record SubtitleSourceScanResult(
@@ -36,9 +75,16 @@ public sealed class ScanService(ArchiveService archiveService)
         ".ass", ".ssa", ".srt", ".vtt", ".sub", ".sup"
     };
 
-    public async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsAsync(
+    public Task<IReadOnlyList<VideoTarget>> FindVideoTargetsAsync(
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken = default)
+        => Task.Run(
+            () => FindVideoTargetsCoreAsync(downloadRoot, cancellationToken),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsCoreAsync(
+        IStorageFolder downloadRoot,
+        CancellationToken cancellationToken)
     {
         var torrentRoot = await StorageAccessService.FindChildFolderAsync(downloadRoot, "Torrent", cancellationToken);
         if (torrentRoot is null)
@@ -121,9 +167,16 @@ public sealed class ScanService(ArchiveService archiveService)
         CancellationToken cancellationToken = default)
         => (await FindSubtitleSourcesWithMetricsAsync(downloadRoot, cancellationToken)).Sources;
 
-    public async Task<SubtitleSourceScanResult> FindSubtitleSourcesWithMetricsAsync(
+    public Task<SubtitleSourceScanResult> FindSubtitleSourcesWithMetricsAsync(
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken = default)
+        => Task.Run(
+            () => FindSubtitleSourcesWithMetricsCoreAsync(downloadRoot, cancellationToken),
+            cancellationToken);
+
+    private async Task<SubtitleSourceScanResult> FindSubtitleSourcesWithMetricsCoreAsync(
+        IStorageFolder downloadRoot,
+        CancellationToken cancellationToken)
     {
         var archives = new List<NamedFile>();
         var loose = new List<NamedFile>();
@@ -153,6 +206,7 @@ public sealed class ScanService(ArchiveService archiveService)
         var archiveWatch = Stopwatch.StartNew();
         var cache = await _archiveCache.LoadAsync(cancellationToken);
         var refreshedCache = new ArchiveIndexCacheRecord?[orderedArchives.Length];
+        var failures = new ArchiveScanFailure?[orderedArchives.Length];
         var cacheHits = 0;
         var validated = 0;
 
@@ -217,10 +271,12 @@ public sealed class ScanService(ArchiveService archiveService)
                 {
                     throw;
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Do not keep/reuse a stale cache entry after a failed attempt to
-                    // validate a file whose signature no longer matched.
+                    // validate a file whose signature no longer matched. Record the
+                    // failure so an archive can no longer disappear from scan counts.
+                    failures[index] = ArchiveScanFailure.FromException(archive.Name, ex);
                 }
                 finally
                 {
@@ -256,12 +312,14 @@ public sealed class ScanService(ArchiveService archiveService)
         }
         finalizeWatch.Stop();
 
+        var archiveFailures = failures.OfType<ArchiveScanFailure>().ToArray();
+
         return new SubtitleSourceScanResult(
             sources.ToArray(),
             rootWatch.Elapsed,
             archiveWatch.Elapsed,
             finalizeWatch.Elapsed,
-            new ArchiveScanCount(orderedArchives.Length, cacheHits, validated),
+            new ArchiveScanCount(orderedArchives.Length, cacheHits, validated, archiveFailures),
             loose.Count,
             cacheHits,
             validated);

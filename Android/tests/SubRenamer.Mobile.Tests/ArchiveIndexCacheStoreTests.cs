@@ -93,10 +93,38 @@ public sealed class ArchiveIndexCacheStoreTests
     [Test]
     public void Archive_scan_count_text_includes_cache_hit_and_reindex_counts()
     {
-        var summary = new ArchiveScanCount(25, 20, 5).ToString();
+        var summary = new ArchiveScanCount(25, 20, 5, []).ToString();
 
-        Assert.That(summary, Does.Contain("25"));
-        Assert.That(summary, Does.Contain("缓存命中 20"));
-        Assert.That(summary, Does.Contain("实际重索引 5"));
+        Assert.That(summary, Does.Contain("共 25 包"));
+        Assert.That(summary, Does.Contain("缓存命中 20 包"));
+        Assert.That(summary, Does.Contain("成功重索引 5"));
+        Assert.That(summary, Does.Not.Contain("索引失败"));
+    }
+
+    [Test]
+    public void Archive_scan_count_reports_failed_archive_name_and_error()
+    {
+        var failure = new ArchiveScanFailure(
+            "broken-pack.rar",
+            "InvalidOperationException: encrypted archive");
+        var summary = new ArchiveScanCount(25, 24, 0, [failure]).ToString();
+
+        Assert.That(summary, Does.Contain("索引失败 1 包"));
+        Assert.That(summary, Does.Contain("broken-pack.rar"));
+        Assert.That(summary, Does.Contain("InvalidOperationException"));
+        Assert.That(summary, Does.Contain("成功重索引 0"));
+    }
+
+    [Test]
+    public void Archive_failure_compacts_multiline_exception_messages()
+    {
+        var failure = ArchiveScanFailure.FromException(
+            "broken.7z",
+            new InvalidDataException("line one\r\nline two"));
+
+        Assert.That(failure.ArchiveName, Is.EqualTo("broken.7z"));
+        Assert.That(failure.Error, Does.Contain("InvalidDataException"));
+        Assert.That(failure.Error, Does.Not.Contain("\r"));
+        Assert.That(failure.Error, Does.Not.Contain("\n"));
     }
 }

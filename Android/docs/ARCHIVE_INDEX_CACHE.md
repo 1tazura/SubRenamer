@@ -45,11 +45,45 @@ The scan performance text reports archive work as:
 
 - total archive count;
 - cache hits;
-- actual re-indexes.
+- validation failures;
+- successful actual re-indexes.
 
-For example, a warm scan of 25 unchanged archives may report `共 25 包，缓存命中 25，实际重索引 0`. A first scan or a scan after changing Download authorization should report zero cache hits and re-index the archives normally.
+A failed archive is now named in the same diagnostic text together with a compact exception type/message. This closes a previous accounting gap where a failed `ListSubtitleEntriesAsync()` call could be swallowed and the archive would appear in the total count but in neither the cache-hit nor re-index count.
+
+For example, a warm scan may report:
+
+```text
+共 25 包，缓存命中 24 包，索引失败 1 包 [broken-pack.rar: InvalidOperationException: ...]，成功重索引 0 包
+```
+
+The accounting invariant for a completed scan is therefore:
+
+```text
+total = cache hits + successful re-indexes + failed validations
+```
+
+Metadata absence is not itself a validation failure. It disables cache reuse for that file and forces a normal full archive inspection; a successful inspection still counts as a re-index.
+
+## Top-level scan scheduling
+
+Starting in v0.1.19, the public video-target scan and subtitle-source scan each dispatch their core SAF work to a separate worker. The UI still starts both operations together and waits with `Task.WhenAll`, but synchronous provider/IPC work performed before an `await` can no longer pin both scan chains to the same worker.
+
+This change does **not** increase `ArchiveScanConcurrency`: archive validation remains bounded at 2. The purpose is only to allow the video traversal and subtitle-source scan to overlap when the Android storage provider permits it.
+
+Real-device timing remains the authority. Android `DocumentsProvider` implementations may still serialize requests internally, so concurrency is not assumed to guarantee a speedup.
+
+## Real-device baseline before v0.1.19
+
+On the measured 25-archive workload, v0.1.18 showed:
+
+- cold scan: archive indexing about 5303 ms, total about 7762 ms;
+- immediate warm scan: archive indexing about 422 ms, total about 2797 ms;
+- warm-cache accounting: 24 cache hits out of 25 archives.
+
+The reduction from about 5.3 s to about 0.42 s validates the persistent cache itself. The 25-versus-24 accounting mismatch motivated the explicit failure diagnostics added in v0.1.19.
 
 ## Version history
 
 - **v0.1.17** introduced persistent positive/negative archive index caching while preserving eager validation.
-- **v0.1.18** completes the acceptance contract by clearing cache state when the Download bookmark changes, adding cache-focused tests, and surfacing hit/re-index counts in scan diagnostics.
+- **v0.1.18** completed cache invalidation on Download bookmark changes, added cache-focused tests, and surfaced hit/re-index counts.
+- **v0.1.19** gives video/subtitle scans independent workers and makes archive validation failures visible and fully accounted for.
