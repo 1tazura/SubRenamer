@@ -53,7 +53,7 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
         {
             var bookmark = await folder.SaveBookmarkAsync();
             if (!string.IsNullOrWhiteSpace(bookmark))
-                await settingsStore.SaveAsync(new AppSettings(bookmark), cancellationToken);
+                await settingsStore.SaveDownloadBookmarkAsync(bookmark, cancellationToken);
         }
 
         return folder;
@@ -98,5 +98,39 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
                 names.Add(file.Name);
         }
         return names;
+    }
+
+    public static async Task<Dictionary<string, IStorageFile>> SnapshotChildFilesAsync(
+        IStorageFolder parent,
+        CancellationToken cancellationToken = default)
+    {
+        var files = new Dictionary<string, IStorageFile>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var item in parent.GetItemsAsync().WithCancellation(cancellationToken))
+        {
+            if (item is IStorageFile file)
+                files.TryAdd(file.Name, file);
+        }
+        return files;
+    }
+
+    public static async Task<IStorageFolder?> ResolveRelativeFolderAsync(
+        IStorageFolder downloadRoot,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        IStorageFolder current = downloadRoot;
+        var segments = relativePath
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var segment in segments)
+        {
+            var next = await FindChildFolderAsync(current, segment, cancellationToken);
+            if (next is null)
+                return null;
+            current = next;
+        }
+
+        return current;
     }
 }
