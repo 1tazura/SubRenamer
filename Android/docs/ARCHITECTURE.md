@@ -58,11 +58,15 @@ After work attribution, the Android shell passes only:
 - direct video filenames from the selected target directory;
 - subtitle display filenames from the selected source.
 
-`SubRenamerCoreBridge` is a typed adapter around the original `SubRenamer.Core.Matcher.Execute` call.
+`SubRenamerCoreBridge` is a typed adapter around the original `SubRenamer.Core.Matcher.Execute` call. Android exposes three episode-matching modes without changing `SubRenamer.Core`:
 
-The Android shell does not reimplement upstream `diff -> extract -> mapping` logic.
+- **Diff**: call Core with empty `MatcherOptions`, preserving upstream automatic diff/extract behavior;
+- **Manual**: translate desktop-style patterns where `$$` marks the matching key and `*` is a wildcard into regular expressions, then pass them as `MatcherOptions.VideoRegex` / `SubtitleRegex`;
+- **Regex**: validate user regex and pass it directly through the same `MatcherOptions`; capture group 1 is the key because that is what the upstream Core reads.
 
-Manual/Regex episode matching modes from upstream are not yet exposed in Android; see `FEATURES.md` / `ROADMAP.md`.
+The Android shell does not reimplement upstream episode mapping. It only prepares the options accepted by Core and forwards the result into the same planning layer.
+
+Matching mode and rule text are persisted in app-private settings and do not alter the authorized storage tree.
 
 ## 6. Plan generation
 
@@ -125,12 +129,13 @@ The main screen currently orchestrates:
 authorize Download
   -> scan targets/sources
   -> choose source and target attribution
+  -> choose Diff / Manual / Regex episode matching
   -> build Core preview
   -> apply subtitle outputs
   -> optional undo
 ```
 
-The current UI is intentionally small and does not yet expose the complete upstream desktop editing/rule/settings toolset.
+The current matching-mode UI is intentionally compact. It exposes Core functionality but does not yet reproduce the desktop sample-file rule testers or per-item editor.
 
 ## 10. Hard safety invariants
 
