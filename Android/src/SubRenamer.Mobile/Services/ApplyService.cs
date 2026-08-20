@@ -3,7 +3,13 @@ using SubRenamer.Mobile.Models;
 
 namespace SubRenamer.Mobile.Services;
 
-public sealed record ApplyResult(int Applied, int Skipped, IReadOnlyList<string> Errors);
+public sealed record AppliedFileRecord(string DestinationName, string Sha256);
+
+public sealed record ApplyResult(
+    int Applied,
+    int Skipped,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<AppliedFileRecord> CreatedFiles);
 
 public sealed class ApplyService(ArchiveService archiveService)
 {
@@ -14,6 +20,7 @@ public sealed class ApplyService(ArchiveService archiveService)
         var applied = 0;
         var skipped = 0;
         var errors = new List<string>();
+        var createdFiles = new List<AppliedFileRecord>();
 
         // Recheck the directory once at apply time so a file created after preview
         // is still protected, without issuing one full SAF directory query per item.
@@ -58,26 +65,32 @@ public sealed class ApplyService(ArchiveService archiveService)
                     if (created is null)
                         throw new IOException($"Could not create subtitle file: {item.DestinationName}");
 
-                    await using var destination = await created.OpenWriteAsync();
-
-                    if (plan.Source.Kind == SubtitleSourceKind.Archive)
+                    CopyFingerprint fingerprint;
+                    await using (var destination = await created.OpenWriteAsync())
                     {
-                        if (archiveSession is null)
-                            throw new InvalidOperationException("Archive session is unavailable.");
+                        if (plan.Source.Kind == SubtitleSourceKind.Archive)
+                        {
+                            if (archiveSession is null)
+                                throw new InvalidOperationException("Archive session is unavailable.");
 
-                        await archiveSession.CopyEntryToAsync(item.SourceKey, destination, cancellationToken);
+                            fingerprint = await archiveSession.CopyEntryToAsync(
+                                item.SourceKey, destination, cancellationToken);
+                        }
+                        else
+                        {
+                            if (looseByName is null || !looseByName.TryGetValue(item.SourceKey, out var sourceFile))
+                                throw new FileNotFoundException($"Loose subtitle source not found: {item.SourceKey}");
+
+                            await using var source = await sourceFile.OpenReadAsync();
+                            fingerprint = await StreamCopyService.CopyWithSha256Async(
+                                source, destination, cancellationToken);
+                        }
+
+                        await destination.FlushAsync(cancellationToken);
                     }
-                    else
-                    {
-                        if (looseByName is null || !looseByName.TryGetValue(item.SourceKey, out var sourceFile))
-                            throw new FileNotFoundException($"Loose subtitle source not found: {item.SourceKey}");
 
-                        await using var source = await sourceFile.OpenReadAsync();
-                        await source.CopyToAsync(destination, cancellationToken);
-                    }
-
-                    await destination.FlushAsync(cancellationToken);
                     existingNames.Add(item.DestinationName);
+                    createdFiles.Add(new AppliedFileRecord(item.DestinationName, fingerprint.Sha256));
                     applied++;
                 }
                 catch (Exception ex)
@@ -96,6 +109,6 @@ public sealed class ApplyService(ArchiveService archiveService)
                 await archiveSession.DisposeAsync();
         }
 
-        return new ApplyResult(applied, skipped, errors);
+        return new ApplyResult(applied, skipped, errors, createdFiles);
     }
 }
