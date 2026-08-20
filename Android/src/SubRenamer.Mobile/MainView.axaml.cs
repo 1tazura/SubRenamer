@@ -28,6 +28,7 @@ public partial class MainView : UserControl
     private bool _suppressMatchModeChanged = true;
     private bool _busy;
     private string _lastScanPerformanceText = "";
+    private string _lastArchiveIndexPerformanceText = "";
 
     private CoreMatchMode _matchMode = CoreMatchMode.Diff;
     private string _manualVideoPattern = "";
@@ -211,6 +212,7 @@ public partial class MainView : UserControl
         _cards.Clear();
         _currentPlan = null;
         _lastScanPerformanceText = "";
+        _lastArchiveIndexPerformanceText = "";
         PreviewText.Text = "";
         ApplyButton.Content = "确认处理";
         ApplyButton.IsEnabled = false;
@@ -250,7 +252,9 @@ public partial class MainView : UserControl
                     Source = source,
                     Candidates = ranked.Candidates,
                     SelectedCandidate = ranked.AutoSelected,
-                    State = ranked.AutoSelected is null ? "待确认归属" : "已自动归属",
+                    State = source.Kind == SubtitleSourceKind.Archive && !source.IsIndexed
+                        ? "待按需读取"
+                        : ranked.AutoSelected is null ? "待确认归属" : "已自动归属",
                 });
             }
             attributionWatch.Stop();
@@ -259,20 +263,29 @@ public partial class MainView : UserControl
             _lastScanPerformanceText =
                 $"扫描性能：Torrent 遍历 {result.VideoElapsed.TotalMilliseconds:F0} ms；" +
                 $"Download 根枚举 {result.SubtitleScan.RootEnumerationElapsed.TotalMilliseconds:F0} ms；" +
-                $"压缩包索引 {result.SubtitleScan.ArchiveIndexElapsed.TotalMilliseconds:F0} ms " +
-                $"({result.SubtitleScan.ArchiveCount} 包)；" +
+                $"压缩包预索引 {result.SubtitleScan.ArchiveIndexElapsed.TotalMilliseconds:F0} ms " +
+                $"(延迟读取 {result.SubtitleScan.ArchiveCount} 包)；" +
                 $"来源整理 {result.SubtitleScan.FinalizeElapsed.TotalMilliseconds:F0} ms；" +
-                $"作品归属 {attributionWatch.Elapsed.TotalMilliseconds:F0} ms；" +
+                $"作品初筛 {attributionWatch.Elapsed.TotalMilliseconds:F0} ms；" +
                 $"总计 {totalWatch.Elapsed.TotalMilliseconds:F0} ms。";
 
             StatusText.Text =
-                $"发现 {_targets.Count} 个视频目标目录，{result.SubtitleScan.Sources.Count} 个字幕来源。{_lastScanPerformanceText}";
+                $"发现 {_targets.Count} 个视频目标目录，{result.SubtitleScan.Sources.Count} 个候选字幕来源。{_lastScanPerformanceText}";
 
-            if (_cards.Count > 0)
+            if (_cards.Count == 1)
+            {
                 SourceList.SelectedIndex = 0;
-            else
-                PreviewText.Text = "Download 根目录没有发现含字幕的 zip/7z/rar 或裸字幕文件。" +
+            }
+            else if (_cards.Count > 1)
+            {
+                PreviewText.Text = "扫描完成。压缩包内容现在按需读取：请选择要处理的字幕来源；只有选中的压缩包会被打开并建立字幕索引。" +
                                    Environment.NewLine + Environment.NewLine + _lastScanPerformanceText;
+            }
+            else
+            {
+                PreviewText.Text = "Download 根目录没有发现 zip/7z/rar 或裸字幕文件。" +
+                                   Environment.NewLine + Environment.NewLine + _lastScanPerformanceText;
+            }
         }
         catch (Exception ex)
         {
@@ -285,18 +298,85 @@ public partial class MainView : UserControl
         }
     }
 
+    private async Task<bool> EnsureSourceIndexedAsync(SourceCard card)
+    {
+        if (card.Source.Kind != SubtitleSourceKind.Archive || card.Source.IsIndexed)
+            return true;
+
+        SetBusy(true);
+        try
+        {
+            card.State = "正在读取压缩包";
+            StatusText.Text = $"按需读取压缩包：{card.Source.DisplayName}";
+            var watch = Stopwatch.StartNew();
+            var indexedSource = await Task.Run(() => _scanner.IndexArchiveSourceAsync(card.Source));
+            watch.Stop();
+
+            card.Source = indexedSource;
+            _lastArchiveIndexPerformanceText = $"当前压缩包按需索引 {watch.ElapsedMilliseconds} ms。";
+
+            if (indexedSource.Entries.Count == 0)
+            {
+                card.Candidates = [];
+                card.SelectedCandidate = null;
+                card.State = "无支持字幕";
+                _currentPlan = null;
+                ApplyButton.Content = "确认处理";
+                ApplyButton.IsEnabled = false;
+                _suppressCandidateChanged = true;
+                CandidateCombo.ItemsSource = null;
+                CandidateCombo.SelectedItem = null;
+                _suppressCandidateChanged = false;
+                PreviewText.Text = "该压缩包没有发现支持的字幕条目。" +
+                                   Environment.NewLine + Environment.NewLine +
+                                   _lastArchiveIndexPerformanceText +
+                                   (string.IsNullOrWhiteSpace(_lastScanPerformanceText)
+                                       ? ""
+                                       : Environment.NewLine + _lastScanPerformanceText);
+                StatusText.Text = "压缩包已读取，但没有发现支持的字幕条目。";
+                return false;
+            }
+
+            var ranked = _attribution.Rank(indexedSource, _targets);
+            card.Candidates = ranked.Candidates;
+            card.SelectedCandidate = ranked.AutoSelected;
+            card.State = ranked.AutoSelected is null ? "待确认归属" : "已自动归属";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            card.State = "压缩包读取失败";
+            _currentPlan = null;
+            ApplyButton.Content = "确认处理";
+            ApplyButton.IsEnabled = false;
+            StatusText.Text = $"压缩包读取失败：{ex.Message}";
+            PreviewText.Text = ex.ToString();
+            return false;
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
     private async Task BuildPreviewAsync()
     {
         if (SourceList.SelectedItem is not SourceCard card)
+            return;
+
+        if (!await EnsureSourceIndexedAsync(card))
             return;
 
         if (card.SelectedCandidate is null)
         {
             _currentPlan = null;
             PreviewText.Text = "无法可靠自动归属。请从上方列表点选正确的 Torrent 目录。" +
+                               (string.IsNullOrWhiteSpace(_lastArchiveIndexPerformanceText)
+                                   ? ""
+                                   : Environment.NewLine + Environment.NewLine + _lastArchiveIndexPerformanceText) +
                                (string.IsNullOrWhiteSpace(_lastScanPerformanceText)
                                    ? ""
-                                   : Environment.NewLine + Environment.NewLine + _lastScanPerformanceText);
+                                   : Environment.NewLine + _lastScanPerformanceText);
             ApplyButton.Content = "确认处理";
             ApplyButton.IsEnabled = false;
             return;
@@ -346,6 +426,9 @@ public partial class MainView : UserControl
                 lines.Add(_lastScanPerformanceText);
             }
 
+            if (!string.IsNullOrWhiteSpace(_lastArchiveIndexPerformanceText))
+                lines.Add(_lastArchiveIndexPerformanceText);
+
             if (_currentPlan.Diagnostics.Count > 0)
             {
                 lines.Add("");
@@ -376,6 +459,10 @@ public partial class MainView : UserControl
     private async void SourceList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (SourceList.SelectedItem is not SourceCard card)
+            return;
+
+        _lastArchiveIndexPerformanceText = "";
+        if (!await EnsureSourceIndexedAsync(card))
             return;
 
         _suppressCandidateChanged = true;
@@ -584,6 +671,7 @@ public partial class MainView : UserControl
 
             _undoBatch = null;
             _lastScanPerformanceText = "";
+            _lastArchiveIndexPerformanceText = "";
             RootText.Text = "已授权：Download";
             StatusText.Text = "授权已保存。点“扫描字幕与视频”开始；不会自动扫描。";
         }
