@@ -31,6 +31,7 @@ public sealed class SourceCard : INotifyPropertyChanged
             if (ReferenceEquals(_candidates, value)) return;
             _candidates = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(Summary));
         }
     }
 
@@ -62,9 +63,17 @@ public sealed class SourceCard : INotifyPropertyChanged
     {
         get
         {
-            var sourceInfo = Source.Kind == SubtitleSourceKind.Archive && !Source.IsIndexed
-                ? "压缩包 · 未读取"
-                : $"{Source.SubtitleCount} 字幕";
+            string sourceInfo;
+            if (Source.Kind == SubtitleSourceKind.Archive && !Source.IsIndexed)
+            {
+                sourceInfo = Source.DiscoveryAffinity > 0
+                    ? "疑似相关压缩包 · 未读取内容"
+                    : "其他压缩包 · 未检查内容";
+            }
+            else
+            {
+                sourceInfo = $"{Source.SubtitleCount} 字幕";
+            }
 
             return $"{Source.DisplayName}\n{sourceInfo} · " +
                    (SelectedCandidate is null ? "需要选择目标" : $"→ {SelectedCandidate.Target.RelativePath}") +
