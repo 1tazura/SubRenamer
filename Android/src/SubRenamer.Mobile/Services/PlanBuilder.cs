@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SubRenamer.Mobile.Models;
 
 namespace SubRenamer.Mobile.Services;
@@ -10,11 +11,14 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
         CoreMatchSettings? matchSettings = null,
         CancellationToken cancellationToken = default)
     {
+        var totalSw = Stopwatch.StartNew();
+        var diagnostics = new List<string>();
         var videoNames = target.Videos.Select(x => x.Name).ToArray();
         var subtitleNames = source.Entries.Select(x => x.DisplayName).ToArray();
 
+        var coreSw = Stopwatch.StartNew();
         var rows = await bridge.MatchAsync(videoNames, subtitleNames, matchSettings, cancellationToken);
-        var diagnostics = new List<string>();
+        coreSw.Stop();
 
         var matched = rows
             .Where(x => !string.IsNullOrWhiteSpace(x.Video) && !string.IsNullOrWhiteSpace(x.Subtitle))
@@ -26,9 +30,12 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
 
         // SAF directory enumeration is an IPC/query on Android. Snapshot once rather
         // than running a full folder query for every planned subtitle destination.
+        var storageSw = Stopwatch.StartNew();
         var existingNames = await StorageAccessService.SnapshotChildFileNamesAsync(
             target.Folder, cancellationToken);
+        storageSw.Stop();
 
+        var planSw = Stopwatch.StartNew();
         var items = new List<MatchPlanItem>();
 
         foreach (var videoGroup in matched.GroupBy(x => x.Video, StringComparer.Ordinal))
@@ -103,6 +110,11 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
                 PlanItemStatus.Unmatched,
                 "SubRenamer.Core 未将此字幕映射到视频。"));
         }
+
+        planSw.Stop();
+        totalSw.Stop();
+        diagnostics.Add(
+            $"性能：Core 匹配 {coreSw.ElapsedMilliseconds} ms；目标目录读取 {storageSw.ElapsedMilliseconds} ms；计划生成 {planSw.ElapsedMilliseconds} ms；预览后端合计 {totalSw.ElapsedMilliseconds} ms。");
 
         return new MatchPlan(source, target, items, diagnostics);
     }
