@@ -1,0 +1,146 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Class="SubRenamer.Mobile.MainView">
+  <Grid RowDefinitions="Auto,Auto,*" Margin="16">
+    <StackPanel>
+      <TextBlock Text="SubRenamer Android" FontSize="22" FontWeight="SemiBold"/>
+      <TextBlock x:Name="RootText" Text="尚未授权 Download" Opacity="0.7" TextWrapping="Wrap" Margin="0,2,0,0"/>
+
+      <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" Margin="0,12,0,0">
+        <Button x:Name="RestoreRootButton"
+                MinHeight="48"
+                Margin="0,0,4,0"
+                HorizontalContentAlignment="Center"
+                Content="恢复授权"
+                Click="RestoreRoot_Click"/>
+        <Button x:Name="ChangeRootButton"
+                Grid.Column="1"
+                MinHeight="48"
+                Margin="4,0,0,0"
+                HorizontalContentAlignment="Center"
+                Content="选择 Download"
+                Click="ChangeRoot_Click"/>
+        <Button x:Name="ScanButton"
+                Grid.Row="1"
+                Grid.ColumnSpan="2"
+                MinHeight="48"
+                Margin="0,8,0,0"
+                HorizontalContentAlignment="Center"
+                Content="扫描字幕与视频"
+                Click="ScanOptimized_Click"
+                IsEnabled="False"/>
+      </Grid>
+    </StackPanel>
+
+    <TextBlock Grid.Row="1" x:Name="StatusText" Margin="0,10,0,8" Text="正在检查已保存的 Download 授权…" TextWrapping="Wrap"/>
+
+    <ScrollViewer Grid.Row="2"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+      <StackPanel>
+        <ListBox x:Name="SourceList"
+                 MaxHeight="220"
+                 HorizontalAlignment="Stretch"
+                 SelectionChanged="SourceList_SelectionChanged">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Border Padding="10" Margin="0,0,0,6" BorderThickness="1" CornerRadius="8">
+                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <ComboBox Margin="0,8,0,0"
+                  x:Name="CandidateCombo"
+                  HorizontalAlignment="Stretch"
+                  SelectionChanged="CandidateCombo_SelectionChanged">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Display}" TextWrapping="Wrap"/>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+
+        <Border Margin="0,8,0,0" Padding="10" BorderThickness="1" CornerRadius="8">
+          <StackPanel>
+            <TextBlock Text="集数匹配模式" FontWeight="SemiBold"/>
+            <ComboBox x:Name="MatchModeCombo"
+                      Margin="0,6,0,0"
+                      HorizontalAlignment="Stretch"
+                      SelectedIndex="0"
+                      SelectionChanged="MatchModeCombo_SelectionChanged">
+              <ComboBoxItem Content="自动 (Diff)"/>
+              <ComboBoxItem Content="手动规则"/>
+              <ComboBoxItem Content="正则表达式"/>
+            </ComboBox>
+
+            <TextBlock x:Name="MatchRuleHint"
+                       Margin="0,6,0,0"
+                       Opacity="0.7"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       Text="自动模式使用原 SubRenamer.Core 的 diff → extract → mapping。"/>
+
+            <StackPanel x:Name="MatchRulePanel" IsVisible="False" Margin="0,8,0,0">
+              <TextBlock x:Name="VideoRuleLabel" Text="视频规则"/>
+              <TextBox x:Name="VideoRuleTextBox"
+                       Margin="0,4,0,0"
+                       HorizontalAlignment="Stretch"/>
+
+              <TextBlock x:Name="SubtitleRuleLabel" Text="字幕规则" Margin="0,8,0,0"/>
+              <TextBox x:Name="SubtitleRuleTextBox"
+                       Margin="0,4,0,0"
+                       HorizontalAlignment="Stretch"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <Button x:Name="PreviewButton"
+                MinHeight="48"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                Content="重新生成预览"
+                Click="Preview_Click"/>
+
+        <Button x:Name="ApplyButton"
+                MinHeight="56"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                FontWeight="SemiBold"
+                Content="确认处理"
+                Click="ApplyInstrumented_Click"
+                IsEnabled="False"/>
+
+        <Button x:Name="UndoButton"
+                MinHeight="48"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                Content="撤销上次处理"
+                Click="UndoInstrumented_Click"
+                IsEnabled="False"/>
+
+        <TextBlock Margin="0,4,0,0"
+                   Opacity="0.6"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   Text="撤销只删除上一次由本应用创建且内容未被修改的字幕文件。"/>
+
+        <TextBlock x:Name="PreviewText"
+                   Margin="0,12,0,0"
+                   FontFamily="monospace"
+                   TextWrapping="Wrap"
+                   Text="选择一个字幕来源查看预览。"/>
+
+        <TextBlock Margin="0,12,0,8"
+                   Opacity="0.65"
+                   TextWrapping="Wrap"
+                   Text="视频文件永不移动/改名；字幕只写入现有视频目录；源字幕保留；已存在目标不覆盖。"/>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

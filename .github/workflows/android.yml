@@ -1,0 +1,258 @@
+name: build-android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ android-port-v1 ]
+    paths:
+      - 'Android/**'
+      - 'SubRenamer.Core/**'
+      - 'SubRenamer.Tests/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'Android/**'
+      - 'SubRenamer.Core/**'
+      - 'SubRenamer.Tests/**'
+      - '.github/workflows/android.yml'
+
+concurrency:
+  group: build-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 and .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore stable debug signing keystore
+        id: debug-signing-cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-signing/subrenamer-debug.keystore
+          key: subrenamer-android-debug-signing-v1
+
+      - name: Create debug signing keystore on first use
+        if: steps.debug-signing-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-signing
+          keytool -genkeypair \
+            -keystore .ci-signing/subrenamer-debug.keystore \
+            -storetype PKCS12 \
+            -storepass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
+            -keypass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
+            -alias subrenamer-debug \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname 'CN=SubRenamer Android CI Debug,O=SubRenamer'
+
+      - name: Run original SubRenamer tests
+        run: dotnet test SubRenamer.Tests/SubRenamer.Tests.csproj -c Release --verbosity normal
+
+      - name: Install .NET Android workload
+        run: dotnet workload install android
+
+      - name: Run Android integration tests
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test Android/tests/SubRenamer.Mobile.Tests/SubRenamer.Mobile.Tests.csproj -c Release --verbosity normal 2>&1 | tee Android/mobile-test.log
+
+      - name: Upload Android test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubRenamer-Android-test-diagnostics
+          path: Android/mobile-test.log
+          if-no-files-found: warn
+
+      - name: Clean Android publish intermediates
+        shell: bash
+        run: |
+          find Android/src -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
+          mkdir -p artifacts
+
+      - name: Publish arm64 debug-signed APK
+        shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
+        run: |
+          set -euo pipefail
+          dotnet publish Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+            -c Debug -f net10.0-android -r android-arm64 \
+            -p:AndroidPackageFormat=apk \
+            -p:EmbedAssembliesIntoApk=true \
+            -p:RunAOTCompilation=false \
+            -p:AndroidEnableProfiledAot=false \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$GITHUB_WORKSPACE/.ci-signing/subrenamer-debug.keystore" \
+            -p:AndroidSigningStorePass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            -p:AndroidSigningKeyAlias=subrenamer-debug \
+            -p:AndroidSigningKeyPass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            --verbosity normal 2>&1 | tee Android/android-debug-build.log
+
+          debug_apk="$(find Android/src/SubRenamer.Mobile.Android/bin/Debug -type f -name '*-Signed.apk' -print -quit)"
+          test -n "$debug_apk"
+          cp "$debug_apk" artifacts/SubRenamer-Android-arm64-debug.apk
+
+      - name: Clean before release-untrimmed candidate
+        shell: bash
+        run: find Android/src -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
+
+      - name: Probe arm64 release-untrimmed candidate
+        continue-on-error: true
+        shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
+        run: |
+          set -euo pipefail
+          dotnet publish Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+            -c Release -f net10.0-android -r android-arm64 \
+            -p:AndroidPackageFormat=apk \
+            -p:EmbedAssembliesIntoApk=true \
+            -p:PublishTrimmed=false \
+            -p:RunAOTCompilation=false \
+            -p:AndroidEnableProfiledAot=false \
+            -p:UseAppHost=false \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$GITHUB_WORKSPACE/.ci-signing/subrenamer-debug.keystore" \
+            -p:AndroidSigningStorePass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            -p:AndroidSigningKeyAlias=subrenamer-debug \
+            -p:AndroidSigningKeyPass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            --verbosity normal 2>&1 | tee Android/android-release-build.log
+
+          release_apk="$(find Android/src/SubRenamer.Mobile.Android/bin/Release -type f -name '*-Signed.apk' -print -quit)"
+          test -n "$release_apk"
+          cp "$release_apk" artifacts/SubRenamer-Android-arm64-release-untrimmed.apk
+
+      - name: Clean before release-trimmed candidate
+        shell: bash
+        run: find Android/src -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
+
+      - name: Probe arm64 release-trimmed candidate
+        continue-on-error: true
+        shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
+        run: |
+          set -euo pipefail
+          dotnet publish Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+            -c Release -f net10.0-android -r android-arm64 \
+            -p:AndroidPackageFormat=apk \
+            -p:EmbedAssembliesIntoApk=true \
+            -p:PublishTrimmed=true \
+            -p:TrimMode=partial \
+            -p:RunAOTCompilation=false \
+            -p:AndroidEnableProfiledAot=false \
+            -p:UseAppHost=false \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$GITHUB_WORKSPACE/.ci-signing/subrenamer-debug.keystore" \
+            -p:AndroidSigningStorePass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            -p:AndroidSigningKeyAlias=subrenamer-debug \
+            -p:AndroidSigningKeyPass=env:SUBRENAMER_ANDROID_SIGNING_PASSWORD \
+            --verbosity normal 2>&1 | tee Android/android-release-trimmed-build.log
+
+          trimmed_apk="$(find Android/src/SubRenamer.Mobile.Android/bin/Release -type f -name '*-Signed.apk' -print -quit)"
+          test -n "$trimmed_apk"
+          cp "$trimmed_apk" artifacts/SubRenamer-Android-arm64-release-trimmed.apk
+
+      - name: Verify arm64 packages and report size
+        shell: bash
+        env:
+          SUBRENAMER_ANDROID_SIGNING_PASSWORD: android
+        run: |
+          set -euo pipefail
+
+          verify_apk() {
+            local apk="$1"
+            local listing="$2"
+            unzip -Z1 "$apk" > "$listing"
+            grep -q '^lib/arm64-v8a/' "$listing"
+            if grep -q '^lib/x86_64/' "$listing"; then
+              echo "Unexpected x86_64 payload in $apk" >&2
+              exit 1
+            fi
+          }
+
+          debug_apk=artifacts/SubRenamer-Android-arm64-debug.apk
+          verify_apk "$debug_apk" artifacts/apk-contents-debug.txt
+          debug_bytes="$(stat -c%s "$debug_apk")"
+          echo "arm64 debug bytes=$debug_bytes" > artifacts/apk-size-report.txt
+
+          release_apk=artifacts/SubRenamer-Android-arm64-release-untrimmed.apk
+          if test -f "$release_apk"; then
+            verify_apk "$release_apk" artifacts/apk-contents-release.txt
+            release_bytes="$(stat -c%s "$release_apk")"
+            echo "arm64 release-untrimmed bytes=$release_bytes" >> artifacts/apk-size-report.txt
+            awk -v d="$debug_bytes" -v r="$release_bytes" 'BEGIN { printf "release_untrimmed_vs_debug_reduction=%.1f%%\n", (d-r)*100/d }' >> artifacts/apk-size-report.txt
+          else
+            echo 'arm64 release-untrimmed candidate=build failed' >> artifacts/apk-size-report.txt
+          fi
+
+          trimmed_apk=artifacts/SubRenamer-Android-arm64-release-trimmed.apk
+          if test -f "$trimmed_apk"; then
+            verify_apk "$trimmed_apk" artifacts/apk-contents-trimmed.txt
+            trimmed_bytes="$(stat -c%s "$trimmed_apk")"
+            echo "arm64 release-trimmed bytes=$trimmed_bytes" >> artifacts/apk-size-report.txt
+            awk -v d="$debug_bytes" -v t="$trimmed_bytes" 'BEGIN { printf "release_trimmed_vs_debug_reduction=%.1f%%\n", (d-t)*100/d }' >> artifacts/apk-size-report.txt
+            if test -f "$release_apk"; then
+              awk -v r="$release_bytes" -v t="$trimmed_bytes" 'BEGIN { printf "trimmed_vs_untrimmed_reduction=%.1f%%\n", (r-t)*100/r }' >> artifacts/apk-size-report.txt
+            fi
+          else
+            echo 'arm64 release-trimmed candidate=build failed' >> artifacts/apk-size-report.txt
+          fi
+
+          cat artifacts/apk-size-report.txt
+
+          keytool -list -v \
+            -keystore .ci-signing/subrenamer-debug.keystore \
+            -storepass "$SUBRENAMER_ANDROID_SIGNING_PASSWORD" \
+            -alias subrenamer-debug > artifacts/debug-signing-certificate.txt
+
+      - name: Upload Android build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubRenamer-Android-build-diagnostics
+          path: |
+            Android/android-debug-build.log
+            Android/android-release-build.log
+            Android/android-release-trimmed-build.log
+          if-no-files-found: warn
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubRenamer-Android-arm64
+          path: |
+            artifacts/SubRenamer-Android-arm64-debug.apk
+            artifacts/SubRenamer-Android-arm64-release-untrimmed.apk
+            artifacts/SubRenamer-Android-arm64-release-trimmed.apk
+            artifacts/apk-contents-debug.txt
+            artifacts/apk-contents-release.txt
+            artifacts/apk-contents-trimmed.txt
+            artifacts/apk-size-report.txt
+            artifacts/debug-signing-certificate.txt
+          if-no-files-found: error
