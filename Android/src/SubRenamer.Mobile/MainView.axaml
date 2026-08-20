@@ -63,6 +63,40 @@
           </ComboBox.ItemTemplate>
         </ComboBox>
 
+        <Border Margin="0,8,0,0" Padding="10" BorderThickness="1" CornerRadius="8">
+          <StackPanel>
+            <TextBlock Text="集数匹配模式" FontWeight="SemiBold"/>
+            <ComboBox x:Name="MatchModeCombo"
+                      Margin="0,6,0,0"
+                      HorizontalAlignment="Stretch"
+                      SelectedIndex="0"
+                      SelectionChanged="MatchModeCombo_SelectionChanged">
+              <ComboBoxItem Content="自动 (Diff)"/>
+              <ComboBoxItem Content="手动规则"/>
+              <ComboBoxItem Content="正则表达式"/>
+            </ComboBox>
+
+            <TextBlock x:Name="MatchRuleHint"
+                       Margin="0,6,0,0"
+                       Opacity="0.7"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       Text="自动模式使用原 SubRenamer.Core 的 diff → extract → mapping。"/>
+
+            <StackPanel x:Name="MatchRulePanel" IsVisible="False" Margin="0,8,0,0">
+              <TextBlock x:Name="VideoRuleLabel" Text="视频规则"/>
+              <TextBox x:Name="VideoRuleTextBox"
+                       Margin="0,4,0,0"
+                       HorizontalAlignment="Stretch"/>
+
+              <TextBlock x:Name="SubtitleRuleLabel" Text="字幕规则" Margin="0,8,0,0"/>
+              <TextBox x:Name="SubtitleRuleTextBox"
+                       Margin="0,4,0,0"
+                       HorizontalAlignment="Stretch"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
         <Button x:Name="PreviewButton"
                 MinHeight="48"
                 Margin="0,8,0,0"
