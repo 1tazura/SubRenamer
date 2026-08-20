@@ -2,7 +2,7 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     x:Class="SubRenamer.Mobile.MainView">
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="16">
+  <Grid RowDefinitions="Auto,Auto,*" Margin="16">
     <StackPanel>
       <TextBlock Text="SubRenamer Android" FontSize="22" FontWeight="SemiBold"/>
       <TextBlock x:Name="RootText" Text="尚未授权 Download" Opacity="0.7" TextWrapping="Wrap" Margin="0,2,0,0"/>
@@ -35,56 +35,63 @@
 
     <TextBlock Grid.Row="1" x:Name="StatusText" Margin="0,10,0,8" Text="正在检查已保存的 Download 授权…" TextWrapping="Wrap"/>
 
-    <Grid Grid.Row="2" RowDefinitions="2*,Auto,Auto,3*">
-      <ListBox x:Name="SourceList" SelectionChanged="SourceList_SelectionChanged">
-        <ListBox.ItemTemplate>
-          <DataTemplate>
-            <Border Padding="10" Margin="0,0,0,6" BorderThickness="1" CornerRadius="8">
-              <TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/>
-            </Border>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
+    <ScrollViewer Grid.Row="2"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+      <StackPanel>
+        <ListBox x:Name="SourceList"
+                 MaxHeight="220"
+                 HorizontalAlignment="Stretch"
+                 SelectionChanged="SourceList_SelectionChanged">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Border Padding="10" Margin="0,0,0,6" BorderThickness="1" CornerRadius="8">
+                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
 
-      <ComboBox Grid.Row="1" Margin="0,8,0,0"
-                x:Name="CandidateCombo"
-                SelectionChanged="CandidateCombo_SelectionChanged">
-        <ComboBox.ItemTemplate>
-          <DataTemplate>
-            <TextBlock Text="{Binding Display}" TextWrapping="Wrap"/>
-          </DataTemplate>
-        </ComboBox.ItemTemplate>
-      </ComboBox>
+        <ComboBox Margin="0,8,0,0"
+                  x:Name="CandidateCombo"
+                  HorizontalAlignment="Stretch"
+                  SelectionChanged="CandidateCombo_SelectionChanged">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Display}" TextWrapping="Wrap"/>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
 
-      <Grid Grid.Row="2" ColumnDefinitions="*,*" Margin="0,8,0,0">
         <Button x:Name="PreviewButton"
                 MinHeight="48"
-                Margin="0,0,4,0"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Center"
                 Content="重新生成预览"
                 Click="Preview_Click"/>
+
         <Button x:Name="ApplyButton"
-                Grid.Column="1"
-                MinHeight="48"
-                Margin="4,0,0,0"
+                MinHeight="56"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Center"
-                Content="应用"
+                FontWeight="SemiBold"
+                Content="确认处理"
                 Click="Apply_Click"
                 IsEnabled="False"/>
-      </Grid>
 
-      <ScrollViewer Grid.Row="3" Margin="0,8,0,0">
         <TextBlock x:Name="PreviewText"
+                   Margin="0,12,0,0"
                    FontFamily="monospace"
                    TextWrapping="Wrap"
                    Text="选择一个字幕来源查看预览。"/>
-      </ScrollViewer>
-    </Grid>
 
-    <TextBlock Grid.Row="3"
-               Margin="0,8,0,0"
-               Opacity="0.65"
-               TextWrapping="Wrap"
-               Text="视频文件永不移动/改名；字幕只写入现有视频目录；源字幕保留；已存在目标不覆盖。"/>
+        <TextBlock Margin="0,12,0,8"
+                   Opacity="0.65"
+                   TextWrapping="Wrap"
+                   Text="视频文件永不移动/改名；字幕只写入现有视频目录；源字幕保留；已存在目标不覆盖。"/>
+      </StackPanel>
+    </ScrollViewer>
   </Grid>
 </UserControl>
