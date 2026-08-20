@@ -58,7 +58,7 @@ public sealed class ScanService(ArchiveService archiveService)
                     targets.Add(new VideoTarget(
                         snapshot.Work.Folder,
                         snapshot.Work.RelativePath,
-                        snapshot.Videos));
+                        snapshot.Videos.Select(x => x.File).ToArray()));
                 }
 
                 if (snapshot.Work.Depth >= 8)
@@ -67,7 +67,7 @@ public sealed class ScanService(ArchiveService archiveService)
                 foreach (var child in snapshot.Children)
                 {
                     pending.Enqueue(new FolderWork(
-                        child,
+                        child.Folder,
                         $"{snapshot.Work.RelativePath}/{child.Name}",
                         snapshot.Work.Depth + 1));
                 }
@@ -81,18 +81,22 @@ public sealed class ScanService(ArchiveService archiveService)
         FolderWork work,
         CancellationToken cancellationToken)
     {
-        var videos = new List<IStorageFile>();
-        var children = new List<IStorageFolder>();
+        var videos = new List<NamedFile>();
+        var children = new List<NamedFolder>();
 
         await foreach (var item in work.Folder.GetItemsAsync().WithCancellation(cancellationToken))
         {
             switch (item)
             {
-                case IStorageFile file when VideoExtensions.Contains(Path.GetExtension(file.Name)):
-                    videos.Add(file);
+                case IStorageFile file:
+                {
+                    var name = StorageAccessService.GetDisplayNameFast(file);
+                    if (VideoExtensions.Contains(Path.GetExtension(name)))
+                        videos.Add(new NamedFile(file, name));
                     break;
+                }
                 case IStorageFolder child:
-                    children.Add(child);
+                    children.Add(new NamedFolder(child, StorageAccessService.GetDisplayNameFast(child)));
                     break;
             }
         }
@@ -112,8 +116,8 @@ public sealed class ScanService(ArchiveService archiveService)
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken = default)
     {
-        var archives = new List<IStorageFile>();
-        var loose = new List<IStorageFile>();
+        var archives = new List<NamedFile>();
+        var loose = new List<NamedFile>();
 
         var rootWatch = Stopwatch.StartNew();
         await foreach (var item in downloadRoot.GetItemsAsync().WithCancellation(cancellationToken))
@@ -121,11 +125,14 @@ public sealed class ScanService(ArchiveService archiveService)
             if (item is not IStorageFile file)
                 continue;
 
-            var ext = Path.GetExtension(file.Name);
+            // On Android ExternalStorageProvider this avoids an extra metadata
+            // query for every single item in a large Download directory.
+            var name = StorageAccessService.GetDisplayNameFast(file);
+            var ext = Path.GetExtension(name);
             if (ArchiveService.ArchiveExtensions.Contains(ext))
-                archives.Add(file);
+                archives.Add(new NamedFile(file, name));
             else if (SubtitleExtensions.Contains(ext))
-                loose.Add(file);
+                loose.Add(new NamedFile(file, name));
         }
         rootWatch.Stop();
 
@@ -145,14 +152,14 @@ public sealed class ScanService(ArchiveService archiveService)
                 await gate.WaitAsync(cancellationToken);
                 try
                 {
-                    var entries = await archiveService.ListSubtitleEntriesAsync(archive, cancellationToken);
+                    var entries = await archiveService.ListSubtitleEntriesAsync(archive.File, cancellationToken);
                     if (entries.Count == 0)
                         return;
 
                     indexed[index] = new SubtitleSource(
                         SubtitleSourceKind.Archive,
                         archive.Name,
-                        archive,
+                        archive.File,
                         [],
                         entries);
                 }
@@ -188,7 +195,7 @@ public sealed class ScanService(ArchiveService archiveService)
                 SubtitleSourceKind.LooseGroup,
                 files.Length == 1 ? files[0].Name : $"裸字幕组 · {files.Length} 个",
                 null,
-                files,
+                files.Select(x => x.File).ToArray(),
                 entries));
         }
         finalizeWatch.Stop();
@@ -202,9 +209,11 @@ public sealed class ScanService(ArchiveService archiveService)
             loose.Count);
     }
 
+    private sealed record NamedFile(IStorageFile File, string Name);
+    private sealed record NamedFolder(IStorageFolder Folder, string Name);
     private sealed record FolderWork(IStorageFolder Folder, string RelativePath, int Depth);
     private sealed record FolderSnapshot(
         FolderWork Work,
-        IReadOnlyList<IStorageFile> Videos,
-        IReadOnlyList<IStorageFolder> Children);
+        IReadOnlyList<NamedFile> Videos,
+        IReadOnlyList<NamedFolder> Children);
 }
