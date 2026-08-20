@@ -20,4 +20,16 @@ public sealed class StreamCopyServiceTests
             "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"));
         Assert.That(Encoding.UTF8.GetString(destination.ToArray()), Is.EqualTo("abc"));
     }
+
+    [Test]
+    public async Task Hash_only_fingerprint_matches_source_without_copying()
+    {
+        await using var source = new MemoryStream(Encoding.UTF8.GetBytes("abc"));
+
+        var result = await StreamCopyService.ComputeSha256Async(source);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result.Sha256, Is.EqualTo(
+            "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"));
+    }
 }
