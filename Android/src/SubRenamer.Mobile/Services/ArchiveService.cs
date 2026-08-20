@@ -50,7 +50,7 @@ public sealed class ArchiveService
             }
         }
 
-        var extension = Path.GetExtension(archiveFile.Name);
+        var extension = Path.GetExtension(StorageAccessService.GetDisplayNameFast(archiveFile));
         var temp = Path.Combine(Path.GetTempPath(), $"subrenamer-{Guid.NewGuid():N}{extension}");
 
         try
