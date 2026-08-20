@@ -31,22 +31,32 @@ public sealed record ArchiveScanCount(
     int Total,
     int CacheHits,
     int Reindexed,
+    IReadOnlyList<ArchiveScanFailure> StableRejections,
+    int StableRejectionCacheHits,
     IReadOnlyList<ArchiveScanFailure> Failures)
 {
+    public int StableRejected => StableRejections.Count;
     public int Failed => Failures.Count;
+    public int Accounted => CacheHits + Reindexed + StableRejected + Failed;
 
     public override string ToString()
     {
+        var rejectionText = StableRejected == 0
+            ? ""
+            : $"，稳定排除 {StableRejected} 包（缓存 {StableRejectionCacheHits}） [{FormatIssues(StableRejections)}]";
+
         var failureText = Failed == 0
             ? ""
-            : $"，索引失败 {Failed} 包 [{string.Join(" | ", Failures.Take(3))}" +
-              (Failed > 3 ? $" | 另有 {Failed - 3} 包" : "") +
-              "]";
+            : $"，索引失败 {Failed} 包 [{FormatIssues(Failures)}]";
 
         // MainView appends the final "包" after this formatted value, so keep
         // the successful re-index count last.
-        return $"共 {Total} 包，缓存命中 {CacheHits} 包{failureText}，成功重索引 {Reindexed}";
+        return $"共 {Total} 包，缓存命中 {CacheHits} 包{rejectionText}{failureText}，成功重索引 {Reindexed}";
     }
+
+    private static string FormatIssues(IReadOnlyList<ArchiveScanFailure> issues)
+        => string.Join(" | ", issues.Take(3)) +
+           (issues.Count > 3 ? $" | 另有 {issues.Count - 3} 包" : "");
 }
 
 public sealed record SubtitleSourceScanResult(
@@ -58,6 +68,11 @@ public sealed record SubtitleSourceScanResult(
     int LooseSubtitleCount,
     int ArchiveCacheHits,
     int ArchiveValidated);
+
+public sealed record FullScanResult(
+    IReadOnlyList<VideoTarget> Targets,
+    TimeSpan VideoTraversalElapsed,
+    SubtitleSourceScanResult SubtitleScan);
 
 public sealed class ScanService(ArchiveService archiveService)
 {
@@ -75,6 +90,50 @@ public sealed class ScanService(ArchiveService archiveService)
         ".ass", ".ssa", ".srt", ".vtt", ".sub", ".sup"
     };
 
+    /// <summary>
+    /// Main Android scan path. Download root is enumerated exactly once to find
+    /// Torrent plus direct subtitle/archive sources, then Torrent traversal and
+    /// archive indexing run on independent workers.
+    /// </summary>
+    public Task<FullScanResult> ScanAllWithMetricsAsync(
+        IStorageFolder downloadRoot,
+        CancellationToken cancellationToken = default)
+        => Task.Run(
+            () => ScanAllWithMetricsCoreAsync(downloadRoot, cancellationToken),
+            cancellationToken);
+
+    private async Task<FullScanResult> ScanAllWithMetricsCoreAsync(
+        IStorageFolder downloadRoot,
+        CancellationToken cancellationToken)
+    {
+        var rootWatch = Stopwatch.StartNew();
+        var root = await SnapshotDownloadRootAsync(downloadRoot, cancellationToken);
+        rootWatch.Stop();
+
+        var videoTask = Task.Run(async () =>
+        {
+            var watch = Stopwatch.StartNew();
+            var targets = await FindVideoTargetsFromTorrentRootCoreAsync(root.TorrentRoot, cancellationToken);
+            watch.Stop();
+            return (Targets: targets, Elapsed: watch.Elapsed);
+        }, cancellationToken);
+
+        var sourceTask = Task.Run(
+            () => BuildSubtitleSourcesWithMetricsCoreAsync(
+                root.Archives,
+                root.LooseSubtitles,
+                rootWatch.Elapsed,
+                cancellationToken),
+            cancellationToken);
+
+        await Task.WhenAll(videoTask, sourceTask).ConfigureAwait(false);
+
+        return new FullScanResult(
+            videoTask.Result.Targets,
+            videoTask.Result.Elapsed,
+            sourceTask.Result);
+    }
+
     public Task<IReadOnlyList<VideoTarget>> FindVideoTargetsAsync(
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken = default)
@@ -86,7 +145,14 @@ public sealed class ScanService(ArchiveService archiveService)
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken)
     {
-        var torrentRoot = await StorageAccessService.FindChildFolderAsync(downloadRoot, "Torrent", cancellationToken);
+        var root = await SnapshotDownloadRootAsync(downloadRoot, cancellationToken);
+        return await FindVideoTargetsFromTorrentRootCoreAsync(root.TorrentRoot, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsFromTorrentRootCoreAsync(
+        IStorageFolder? torrentRoot,
+        CancellationToken cancellationToken)
+    {
         if (torrentRoot is null)
             return [];
 
@@ -178,26 +244,23 @@ public sealed class ScanService(ArchiveService archiveService)
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken)
     {
-        var archives = new List<NamedFile>();
-        var loose = new List<NamedFile>();
-
         var rootWatch = Stopwatch.StartNew();
-        await foreach (var item in downloadRoot.GetItemsAsync().WithCancellation(cancellationToken))
-        {
-            if (item is not IStorageFile file)
-                continue;
-
-            // On Android ExternalStorageProvider this avoids an extra metadata
-            // query for every single item in a large Download directory.
-            var name = StorageAccessService.GetDisplayNameFast(file);
-            var ext = Path.GetExtension(name);
-            if (ArchiveService.ArchiveExtensions.Contains(ext))
-                archives.Add(new NamedFile(file, name));
-            else if (SubtitleExtensions.Contains(ext))
-                loose.Add(new NamedFile(file, name));
-        }
+        var root = await SnapshotDownloadRootAsync(downloadRoot, cancellationToken);
         rootWatch.Stop();
 
+        return await BuildSubtitleSourcesWithMetricsCoreAsync(
+            root.Archives,
+            root.LooseSubtitles,
+            rootWatch.Elapsed,
+            cancellationToken);
+    }
+
+    private async Task<SubtitleSourceScanResult> BuildSubtitleSourcesWithMetricsCoreAsync(
+        IReadOnlyList<NamedFile> archives,
+        IReadOnlyList<NamedFile> loose,
+        TimeSpan rootEnumerationElapsed,
+        CancellationToken cancellationToken)
+    {
         var sources = new List<SubtitleSource>();
         var orderedArchives = archives
             .OrderByDescending(x => x.Name, StringComparer.OrdinalIgnoreCase)
@@ -206,8 +269,10 @@ public sealed class ScanService(ArchiveService archiveService)
         var archiveWatch = Stopwatch.StartNew();
         var cache = await _archiveCache.LoadAsync(cancellationToken);
         var refreshedCache = new ArchiveIndexCacheRecord?[orderedArchives.Length];
+        var stableRejections = new ArchiveScanFailure?[orderedArchives.Length];
         var failures = new ArchiveScanFailure?[orderedArchives.Length];
         var cacheHits = 0;
+        var stableRejectionCacheHits = 0;
         var validated = 0;
 
         if (orderedArchives.Length > 0)
@@ -218,14 +283,25 @@ public sealed class ScanService(ArchiveService archiveService)
             var tasks = orderedArchives.Select(async (archive, index) =>
             {
                 await gate.WaitAsync(cancellationToken);
+                ArchiveSignature? signature = null;
                 try
                 {
-                    var signature = await TryGetArchiveSignatureAsync(archive.File, cancellationToken);
+                    signature = await TryGetArchiveSignatureAsync(archive.File, cancellationToken);
                     if (signature is not null &&
                         cache.TryGetValue(signature.Identity, out var cached) &&
                         cached.Matches(signature.Size, signature.ModifiedUtcTicks))
                     {
                         refreshedCache[index] = cached;
+
+                        if (cached.IsStableRejection)
+                        {
+                            Interlocked.Increment(ref stableRejectionCacheHits);
+                            stableRejections[index] = new ArchiveScanFailure(
+                                archive.Name,
+                                cached.StableRejectionError!);
+                            return;
+                        }
+
                         Interlocked.Increment(ref cacheHits);
 
                         // Negative cache entries are equally important: this archive
@@ -273,10 +349,24 @@ public sealed class ScanService(ArchiveService archiveService)
                 }
                 catch (Exception ex)
                 {
-                    // Do not keep/reuse a stale cache entry after a failed attempt to
-                    // validate a file whose signature no longer matched. Record the
-                    // failure so an archive can no longer disappear from scan counts.
-                    failures[index] = ArchiveScanFailure.FromException(archive.Name, ex);
+                    var issue = ArchiveScanFailure.FromException(archive.Name, ex);
+
+                    // Only cache a deliberately narrow deterministic format rejection.
+                    // Transient I/O/provider/permission failures are never remembered.
+                    if (signature is not null && ArchiveRejectionPolicy.IsStable(ex))
+                    {
+                        stableRejections[index] = issue;
+                        refreshedCache[index] = new ArchiveIndexCacheRecord(
+                            signature.Identity,
+                            signature.Size,
+                            signature.ModifiedUtcTicks,
+                            [],
+                            issue.Error);
+                    }
+                    else
+                    {
+                        failures[index] = issue;
+                    }
                 }
                 finally
                 {
@@ -289,7 +379,8 @@ public sealed class ScanService(ArchiveService archiveService)
         }
 
         // Save one coherent snapshot after the parallel work. Removed archives are
-        // naturally pruned, and failures/metadata-less files are revalidated later.
+        // naturally pruned. Stable deterministic rejections are remembered only
+        // when the full identity/size/mtime signature is available.
         await _archiveCache.SaveAsync(refreshedCache.OfType<ArchiveIndexCacheRecord>(), cancellationToken);
         archiveWatch.Stop();
 
@@ -312,17 +403,65 @@ public sealed class ScanService(ArchiveService archiveService)
         }
         finalizeWatch.Stop();
 
+        var archiveStableRejections = stableRejections.OfType<ArchiveScanFailure>().ToArray();
         var archiveFailures = failures.OfType<ArchiveScanFailure>().ToArray();
 
         return new SubtitleSourceScanResult(
             sources.ToArray(),
-            rootWatch.Elapsed,
+            rootEnumerationElapsed,
             archiveWatch.Elapsed,
             finalizeWatch.Elapsed,
-            new ArchiveScanCount(orderedArchives.Length, cacheHits, validated, archiveFailures),
+            new ArchiveScanCount(
+                orderedArchives.Length,
+                cacheHits,
+                validated,
+                archiveStableRejections,
+                stableRejectionCacheHits,
+                archiveFailures),
             loose.Count,
             cacheHits,
             validated);
+    }
+
+    private static async Task<DownloadRootSnapshot> SnapshotDownloadRootAsync(
+        IStorageFolder downloadRoot,
+        CancellationToken cancellationToken)
+    {
+        IStorageFolder? torrentRoot = null;
+        var archives = new List<NamedFile>();
+        var loose = new List<NamedFile>();
+
+        await foreach (var item in downloadRoot.GetItemsAsync().WithCancellation(cancellationToken))
+        {
+            switch (item)
+            {
+                case IStorageFolder folder:
+                    if (torrentRoot is null &&
+                        string.Equals(
+                            StorageAccessService.GetDisplayNameFast(folder),
+                            "Torrent",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        torrentRoot = folder;
+                    }
+                    break;
+
+                case IStorageFile file:
+                {
+                    // On Android ExternalStorageProvider this avoids an extra metadata
+                    // query for every single item in a large Download directory.
+                    var name = StorageAccessService.GetDisplayNameFast(file);
+                    var ext = Path.GetExtension(name);
+                    if (ArchiveService.ArchiveExtensions.Contains(ext))
+                        archives.Add(new NamedFile(file, name));
+                    else if (SubtitleExtensions.Contains(ext))
+                        loose.Add(new NamedFile(file, name));
+                    break;
+                }
+            }
+        }
+
+        return new DownloadRootSnapshot(torrentRoot, archives, loose);
     }
 
     private static async Task<ArchiveSignature?> TryGetArchiveSignatureAsync(
@@ -355,6 +494,10 @@ public sealed class ScanService(ArchiveService archiveService)
     }
 
     private sealed record ArchiveSignature(string Identity, ulong Size, long ModifiedUtcTicks);
+    private sealed record DownloadRootSnapshot(
+        IStorageFolder? TorrentRoot,
+        IReadOnlyList<NamedFile> Archives,
+        IReadOnlyList<NamedFile> LooseSubtitles);
     private sealed record NamedFile(IStorageFile File, string Name);
     private sealed record NamedFolder(IStorageFolder Folder, string Name);
     private sealed record FolderWork(IStorageFolder Folder, string RelativePath, int Depth);
