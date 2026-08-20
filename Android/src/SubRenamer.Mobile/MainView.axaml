@@ -121,7 +121,7 @@
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Center"
                 Content="撤销上次处理"
-                Click="Undo_Click"
+                Click="UndoInstrumented_Click"
                 IsEnabled="False"/>
 
         <TextBlock Margin="0,4,0,0"
