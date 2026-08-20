@@ -1,8 +1,8 @@
-# Processing / apply performance
+# Processing / apply / undo performance
 
-The scan path and the actual subtitle-placement path are intentionally measured separately. A fast scan does not imply that creating many SAF files, extracting archive entries and writing them beside torrent videos will also be fast.
+The scan path, actual subtitle-placement path and safe undo path are measured separately. A fast scan or apply does not imply that SAF verification/deletion will also be fast.
 
-## v0.1.20 instrumentation
+## Apply instrumentation
 
 After **确认处理**, the preview reports cumulative timings for:
 
@@ -20,7 +20,7 @@ After **确认处理**, the preview reports cumulative timings for:
 
 The cumulative phase times are diagnostic counters, not a promise that every millisecond belongs exclusively to one subsystem. In particular archive decompression work may occur while the entry stream is being read, so it is intentionally counted under transfer.
 
-## v0.1.20 real-device result
+## v0.1.20 real-device apply result
 
 A 50-subtitle archive apply writing 22,064,348 bytes measured:
 
@@ -36,35 +36,26 @@ A 50-subtitle archive apply writing 22,064,348 bytes measured:
 
 Destination creation alone was about 58% of apply time. Creation plus destination opening accumulated about 8.0 seconds, making SAF destination preparation the dominant actionable bottleneck. Transfer/decompression/SHA was secondary at about 2.5 seconds.
 
-## Low-risk optimizations in v0.1.20
-
-v0.1.20 applied two changes that do not alter output semantics:
-
-1. subtitle copy/hash and non-seekable archive staging use a 256 KiB buffer instead of the smaller/default buffers, reducing provider/native read/write call count;
-2. the explicit `FlushAsync` immediately before `DisposeAsync` on every destination subtitle was removed. Closing the output stream remains mandatory and is timed directly; the close/dispose operation is the commit boundary.
-
-SHA-256 remains one-pass during the exact bytes written to the destination. Undo still records that fingerprint and will only delete an unchanged file created by the app.
+v0.1.20 also moved subtitle copy/hash and non-seekable archive staging to 256 KiB buffers and removed a redundant explicit `FlushAsync` immediately before output-stream disposal. Close/dispose remains the required commit boundary.
 
 ## v0.1.21 bounded destination-preparation pipeline
 
-The v0.1.20 measurement makes destination preparation sufficiently clear to optimize without guessing.
-
 v0.1.21 keeps archive extraction and actual subtitle transfer **strictly sequential**, but prepares a small look-ahead window of destination files concurrently:
 
-- up to 4 destination subtitles are being created/opened ahead of the current transfer;
+- up to 4 destination subtitles are created/opened ahead of the current transfer;
 - after one prepared destination is consumed, the next preparation starts before the current subtitle is copied;
-- this lets provider latency from `CreateFileAsync` / `OpenWriteAsync` overlap with archive extraction, hashing and writing;
+- provider latency from `CreateFileAsync` / `OpenWriteAsync` can overlap with archive extraction, hashing and writing;
 - at most the bounded look-ahead window can exist as created-but-not-yet-written files;
 - cancellation or an unexpected outer failure drains that window, closes its streams and deletes those unwritten files best-effort;
 - a provider-returned filename that differs from the exact previewed destination is rejected and deleted rather than silently accepting an auto-renamed collision.
 
 No extraction concurrency is introduced. A single SharpCompress archive session is still consumed in sequence, avoiding unsafe shared-session access and avoiding repeated work for solid 7z archives.
 
-Because creation/open operations now overlap, their displayed timings are explicitly labelled **cumulative**. A new `等待目标就绪` counter measures how long the sequential consumer actually stalls waiting for the look-ahead pipeline. The useful success signal is therefore a much lower Apply wall-clock time and a small destination-ready wait, even if cumulative provider call time remains numerically large.
+Because creation/open operations overlap, their displayed timings are labelled **cumulative**. `等待目标就绪` measures how long the sequential consumer actually stalls waiting for the look-ahead pipeline.
 
-## v0.1.21 real-device acceptance
+## v0.1.21 real-device apply acceptance
 
-The same 50-subtitle workload, again writing 22,064,348 bytes, measured after the bounded preparation pipeline:
+The same 50-subtitle workload, again writing 22,064,348 bytes, measured:
 
 - target-directory recheck: 102 ms;
 - source preparation: 144 ms;
@@ -77,25 +68,61 @@ The same 50-subtitle workload, again writing 22,064,348 bytes, measured after th
 - undo-journal persistence: 22 ms;
 - click-to-complete wall clock: 1762 ms.
 
-The wall-clock apply time therefore fell from 10,872 ms to 1,728 ms on this representative workload, while all 50 outputs still completed successfully. The large cumulative create/open counters are expected under overlap; only 538 ms of destination preparation remained visible to the sequential consumer.
+The wall-clock apply time fell from 10,872 ms to 1,728 ms while all 50 outputs completed successfully. Generic destination-concurrency tuning stops at 4 unless a different device/provider again shows substantial destination-ready wait.
 
-This is the stop point for generic destination-concurrency tuning. Raising the look-ahead above 4 might shave part of the remaining 538 ms, but the maximum possible gain is now small relative to the added provider pressure and the larger number of empty pre-created files that would need cleanup after cancellation or process loss.
+## v0.1.22 undo performance pass
 
-The largest remaining measured phase is real transfer/decompression/SHA work at about 0.9 s for roughly 22 MB. That path already performs one-pass SHA-256 over the exact bytes written and uses a 256 KiB buffer. Generic parallel extraction is deliberately not introduced because one SharpCompress session is shared and solid 7z workloads can regress badly when entries are treated independently.
+The original safe undo path already took one target-directory snapshot, but then processed every recorded output strictly serially:
 
-Further performance work should therefore be workload-specific rather than unconditional:
+`OpenReadAsync -> full SHA-256 -> DeleteAsync`
+
+for each file. This preserved safety but exposed all SAF open/read/delete latency directly in wall-clock time.
+
+v0.1.22 keeps the safety contract and changes only scheduling/I/O details:
+
+- the target folder is still resolved once and snapshotted once;
+- every existing candidate still receives a **full SHA-256 verification**; size/mtime metadata is never accepted as a substitute;
+- SHA-only reads now use the same 256 KiB pooled buffer size as the apply path;
+- each read stream is closed immediately after hashing and before deletion;
+- independent files are processed with bounded concurrency 4;
+- for each individual file the order remains `open -> full hash -> close -> compare -> delete`;
+- changed files are retained exactly as before;
+- the undo journal is cleared only when the batch finishes without per-file errors.
+
+The UI now reports:
+
+- target-folder resolution;
+- target-directory snapshot;
+- cumulative file-open time;
+- cumulative SHA verification time;
+- cumulative deletion time;
+- total bytes hashed;
+- journal-clear time;
+- concurrency;
+- `UndoService` wall-clock time;
+- click-to-complete wall-clock time (including preview refresh when applicable).
+
+Open/hash/delete counters are cumulative across concurrent workers and can therefore sum to more than the Undo wall-clock time. The wall-clock value is the main success metric.
+
+This optimization does **not** remove SHA verification. The intentional cost of rereading every created subtitle remains part of the safety model: undo must not delete a subtitle that was edited or replaced after creation.
+
+## Remaining performance policy
+
+Generic scan and apply performance are accepted on the measured workload. Undo is now instrumented and bounded-parallel in v0.1.22; its first real-device result determines whether concurrency 4 is sufficient.
+
+Further work should be evidence-driven:
 
 - investigate solid-7z batch/streaming extraction only when a real solid-7z source is measurably slow;
-- investigate an Android-native document-creation path only if a different provider/device again shows substantial destination-ready wait;
-- otherwise treat scan/apply performance as accepted and prioritize functionality.
+- investigate Android-native document operations only if a provider/device shows substantial SAF wait after bounded concurrency;
+- do not trade away eager archive validation, exact no-overwrite behavior, or SHA-verified undo for headline timing numbers.
 
 ## Safety invariants
 
-Processing performance work must continue to preserve:
+Performance work must continue to preserve:
 
 - video paths, names and bytes are never changed;
 - source subtitles/archives are retained;
 - existing destination subtitles are not overwritten;
 - exact previewed destination names are not silently changed by provider collision handling;
-- partial or merely pre-created outputs from failed/cancelled items are deleted best-effort;
-- undo only targets files created by the app and verifies their SHA-256 before deletion.
+- partial or merely pre-created outputs from failed/cancelled apply items are deleted best-effort;
+- undo only targets files created by the app and verifies their full SHA-256 before deletion.
