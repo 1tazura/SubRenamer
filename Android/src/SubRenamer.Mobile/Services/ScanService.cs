@@ -15,6 +15,7 @@ public sealed record SubtitleSourceScanResult(
 public sealed class ScanService(ArchiveService archiveService)
 {
     private const int FolderScanConcurrency = 4;
+    private Task<IReadOnlyList<VideoTarget>>? _activeVideoTargetScan;
 
     public static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -26,9 +27,18 @@ public sealed class ScanService(ArchiveService archiveService)
         ".ass", ".ssa", ".srt", ".vtt", ".sub", ".sup"
     };
 
-    public async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsAsync(
+    public Task<IReadOnlyList<VideoTarget>> FindVideoTargetsAsync(
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken = default)
+    {
+        var task = FindVideoTargetsCoreAsync(downloadRoot, cancellationToken);
+        _activeVideoTargetScan = task;
+        return task;
+    }
+
+    private async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsCoreAsync(
+        IStorageFolder downloadRoot,
+        CancellationToken cancellationToken)
     {
         var torrentRoot = await StorageAccessService.FindChildFolderAsync(downloadRoot, "Torrent", cancellationToken);
         if (torrentRoot is null)
@@ -135,25 +145,53 @@ public sealed class ScanService(ArchiveService archiveService)
         }
         rootWatch.Stop();
 
-        var sources = new List<SubtitleSource>();
+        // The video scan is started first by the UI and runs concurrently with the
+        // Download-root enumeration above. Reuse its result only for a cheap archive
+        // filename affinity score. This does not open archive contents and therefore
+        // keeps lazy indexing intact, but it prevents obviously unrelated archives
+        // from being presented ahead of a title-matching subtitle pack.
+        IReadOnlyList<VideoTarget> targets = [];
+        var targetScan = _activeVideoTargetScan;
+        if (targetScan is not null)
+        {
+            try
+            {
+                targets = await targetScan.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // The caller will observe a failed video scan through its own task.
+                // Source discovery can still return archive candidates safely.
+            }
+        }
+
         var orderedArchives = archives
-            .OrderByDescending(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(x => new ScoredArchive(x, ArchiveFilenameAffinity(x.Name, targets)))
+            .OrderByDescending(x => x.Affinity)
+            .ThenByDescending(x => x.Archive.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+        var sources = new List<SubtitleSource>();
 
         // Do not eagerly open every archive in Download. On Android this made a
         // routine source scan scale with all archive contents, even when the user
         // intended to process only one subtitle pack. Archive contents are indexed
         // on first selection via IndexArchiveSourceAsync.
         var archiveWatch = Stopwatch.StartNew();
-        foreach (var archive in orderedArchives)
+        foreach (var scored in orderedArchives)
         {
             sources.Add(new SubtitleSource(
                 SubtitleSourceKind.Archive,
-                archive.Name,
-                archive.File,
+                scored.Archive.Name,
+                scored.Archive.File,
                 [],
                 [],
-                IsIndexed: false));
+                IsIndexed: false,
+                DiscoveryAffinity: scored.Affinity));
         }
         archiveWatch.Stop();
 
@@ -203,8 +241,29 @@ public sealed class ScanService(ArchiveService archiveService)
         };
     }
 
+    private static double ArchiveFilenameAffinity(
+        string archiveName,
+        IReadOnlyList<VideoTarget> targets)
+    {
+        var archiveTokens = FilenameHeuristics.Tokens(archiveName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (archiveTokens.Count == 0 || targets.Count == 0)
+            return 0;
+
+        var best = 0d;
+        foreach (var target in targets)
+        {
+            var folderTokens = FilenameHeuristics.Tokens(Path.GetFileName(target.RelativePath))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            best = Math.Max(best, FilenameHeuristics.Jaccard(archiveTokens, folderTokens));
+        }
+
+        return best;
+    }
+
     private sealed record NamedFile(IStorageFile File, string Name);
     private sealed record NamedFolder(IStorageFolder Folder, string Name);
+    private sealed record ScoredArchive(NamedFile Archive, double Affinity);
     private sealed record FolderWork(IStorageFolder Folder, string RelativePath, int Depth);
     private sealed record FolderSnapshot(
         FolderWork Work,
