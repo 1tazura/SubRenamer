@@ -110,10 +110,18 @@ That trade-off was rejected. The Android workflow intentionally restores **eager
 
 The extra few seconds are currently considered preferable to sacrificing automatic source discovery. Do not reintroduce lazy archive discovery merely to improve the headline scan time unless the automatic-selection semantics can be preserved.
 
+### v0.1.17 validated archive-index cache
+
+Eager validation is retained, but a completed archive inspection is now cached persistently using the archive storage identity plus byte size and last-modified timestamp. The cached result includes both positive results (the real subtitle-entry list) and negative results (the archive was fully inspected and contained no supported subtitles).
+
+On later scans, an archive is reused only when all signature fields still match. New or changed archives are fully opened and validated exactly as before. If the current storage provider cannot supply both size and modification time, caching is disabled for that file and it is fully validated every time. Cache read/write failures are also treated as optimization failures only and never prevent a normal scan.
+
+This preserves the same validated-source discovery and automatic attribution evidence while avoiding repeated archive parsing for unchanged files. The first scan after installing the version still pays the normal eager-validation cost; subsequent scans should primarily pay metadata checks plus full validation only for new/changed archives.
+
 ### Remaining performance work
 
 - Torrent traversal is now roughly 1.1 s on the measured device and is not urgent.
-- Eager indexing of 25 archives remains roughly 4 seconds; optimize this only in ways that preserve validated-source discovery and automatic attribution (for example metadata/index caching or incremental revalidation).
+- Measure first-scan versus warm-cache scan time with the 25-archive workload before attempting more archive concurrency or format-specific parsers.
 - identify whether SAF `CreateFileAsync` is the dominant apply bottleneck only after higher-value functionality work;
 - optimize solid 7z extraction as a batch/streaming operation if repeated random extraction proves expensive.
 
