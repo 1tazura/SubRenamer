@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using SubRenamer.Mobile.Models;
@@ -26,6 +27,7 @@ public partial class MainView : UserControl
     private bool _suppressCandidateChanged;
     private bool _suppressMatchModeChanged = true;
     private bool _busy;
+    private string _lastScanPerformanceText = "";
 
     private CoreMatchMode _matchMode = CoreMatchMode.Diff;
     private string _manualVideoPattern = "";
@@ -208,24 +210,39 @@ public partial class MainView : UserControl
         SetBusy(true);
         _cards.Clear();
         _currentPlan = null;
+        _lastScanPerformanceText = "";
         PreviewText.Text = "";
         ApplyButton.Content = "确认处理";
         ApplyButton.IsEnabled = false;
 
         try
         {
-            StatusText.Text = "后台扫描 Torrent 视频目录与 Download 根目录字幕…";
+            StatusText.Text = "后台并行扫描 Torrent 视频目录与 Download 字幕来源…";
+            var totalWatch = Stopwatch.StartNew();
 
             var result = await Task.Run(async () =>
             {
-                var targets = await _scanner.FindVideoTargetsAsync(root).ConfigureAwait(false);
-                var sources = await _scanner.FindSubtitleSourcesAsync(root).ConfigureAwait(false);
-                return (Targets: targets, Sources: sources);
+                var videoWatch = Stopwatch.StartNew();
+                var targetsTask = _scanner.FindVideoTargetsAsync(root);
+                var measuredTargetsTask = targetsTask.ContinueWith(task =>
+                {
+                    videoWatch.Stop();
+                    return task.GetAwaiter().GetResult();
+                }, TaskScheduler.Default);
+
+                var sourceTask = _scanner.FindSubtitleSourcesWithMetricsAsync(root);
+
+                await Task.WhenAll(measuredTargetsTask, sourceTask).ConfigureAwait(false);
+                return (
+                    Targets: measuredTargetsTask.Result,
+                    VideoElapsed: videoWatch.Elapsed,
+                    SubtitleScan: sourceTask.Result);
             });
 
             _targets = result.Targets;
 
-            foreach (var source in result.Sources)
+            var attributionWatch = Stopwatch.StartNew();
+            foreach (var source in result.SubtitleScan.Sources)
             {
                 var ranked = _attribution.Rank(source, _targets);
                 _cards.Add(new SourceCard
@@ -236,14 +253,26 @@ public partial class MainView : UserControl
                     State = ranked.AutoSelected is null ? "待确认归属" : "已自动归属",
                 });
             }
+            attributionWatch.Stop();
+            totalWatch.Stop();
+
+            _lastScanPerformanceText =
+                $"扫描性能：Torrent 遍历 {result.VideoElapsed.TotalMilliseconds:F0} ms；" +
+                $"Download 根枚举 {result.SubtitleScan.RootEnumerationElapsed.TotalMilliseconds:F0} ms；" +
+                $"压缩包索引 {result.SubtitleScan.ArchiveIndexElapsed.TotalMilliseconds:F0} ms " +
+                $"({result.SubtitleScan.ArchiveCount} 包)；" +
+                $"来源整理 {result.SubtitleScan.FinalizeElapsed.TotalMilliseconds:F0} ms；" +
+                $"作品归属 {attributionWatch.Elapsed.TotalMilliseconds:F0} ms；" +
+                $"总计 {totalWatch.Elapsed.TotalMilliseconds:F0} ms。";
 
             StatusText.Text =
-                $"发现 {_targets.Count} 个视频目标目录，{result.Sources.Count} 个字幕来源。";
+                $"发现 {_targets.Count} 个视频目标目录，{result.SubtitleScan.Sources.Count} 个字幕来源。{_lastScanPerformanceText}";
 
             if (_cards.Count > 0)
                 SourceList.SelectedIndex = 0;
             else
-                PreviewText.Text = "Download 根目录没有发现含字幕的 zip/7z/rar 或裸字幕文件。";
+                PreviewText.Text = "Download 根目录没有发现含字幕的 zip/7z/rar 或裸字幕文件。" +
+                                   Environment.NewLine + Environment.NewLine + _lastScanPerformanceText;
         }
         catch (Exception ex)
         {
@@ -264,7 +293,10 @@ public partial class MainView : UserControl
         if (card.SelectedCandidate is null)
         {
             _currentPlan = null;
-            PreviewText.Text = "无法可靠自动归属。请从上方列表点选正确的 Torrent 目录。";
+            PreviewText.Text = "无法可靠自动归属。请从上方列表点选正确的 Torrent 目录。" +
+                               (string.IsNullOrWhiteSpace(_lastScanPerformanceText)
+                                   ? ""
+                                   : Environment.NewLine + Environment.NewLine + _lastScanPerformanceText);
             ApplyButton.Content = "确认处理";
             ApplyButton.IsEnabled = false;
             return;
@@ -306,6 +338,12 @@ public partial class MainView : UserControl
                 lines.Add(item.Status == PlanItemStatus.Ready
                     ? $"{icon} {item.SourceDisplayName}  →  {item.DestinationName}"
                     : $"{icon} {item.SourceDisplayName}  [{item.Status}] {item.Message}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(_lastScanPerformanceText))
+            {
+                lines.Add("");
+                lines.Add(_lastScanPerformanceText);
             }
 
             if (_currentPlan.Diagnostics.Count > 0)
@@ -379,7 +417,10 @@ public partial class MainView : UserControl
         _currentPlan = null;
         ApplyButton.Content = "确认处理";
         ApplyButton.IsEnabled = false;
-        PreviewText.Text = $"已切换为 {MatchModeText(_matchMode)}。填写需要的规则后点“重新生成预览”。";
+        PreviewText.Text = $"已切换为 {MatchModeText(_matchMode)}。填写需要的规则后点“重新生成预览”。" +
+                           (string.IsNullOrWhiteSpace(_lastScanPerformanceText)
+                               ? ""
+                               : Environment.NewLine + Environment.NewLine + _lastScanPerformanceText);
         StatusText.Text = $"集数匹配模式：{MatchModeText(_matchMode)}。";
     }
 
@@ -542,6 +583,7 @@ public partial class MainView : UserControl
             }
 
             _undoBatch = null;
+            _lastScanPerformanceText = "";
             RootText.Text = "已授权：Download";
             StatusText.Text = "授权已保存。点“扫描字幕与视频”开始；不会自动扫描。";
         }
