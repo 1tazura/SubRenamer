@@ -2,7 +2,7 @@
 
 Android adaptation of [SubRenamer](https://github.com/qwqcode/SubRenamer), built around the original [`SubRenamer.Core`](../SubRenamer.Core/) matching algorithm.
 
-> **Current status:** the basic Android workflow has been validated on a real device: authorize `Download` → scan → attribute subtitle source to torrent target → preview Core mapping → place subtitles → undo the last placement batch.
+> **Current status:** the basic Android workflow has been validated on a real device: authorize `Download` → scan → attribute subtitle source to torrent target → choose Core matching mode → preview → place subtitles → undo the last placement batch.
 
 This port is intentionally **torrent-safe**. It assumes that video files under `Download/Torrent/**` may still be seeding and therefore treats them as read-only inputs.
 
@@ -59,12 +59,17 @@ For implementation details, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 4. It discovers subtitle archives (`zip`, `7z`, `rar`) and loose subtitle files in the `Download` root.
 5. It ranks likely `subtitle source → torrent target` relationships.
 6. If attribution is not confident, select the correct torrent target manually.
-7. The original `SubRenamer.Core` performs episode-level mapping.
+7. Choose an episode-matching mode:
+   - **自动 (Diff)** — original Core diff/extract/mapping;
+   - **手动规则** — desktop-compatible `$$` key marker and `*` wildcard patterns;
+   - **正则表达式** — direct video/subtitle regex; capture group 1 is used as the Core matching key.
 8. Review the exact planned destination filenames.
 9. Tap **确认处理 N 项** to create only the planned subtitle files.
 10. If needed, use **撤销上次处理**. Files edited or replaced after creation are preserved rather than deleted.
 
-A concrete example is in [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
+Matching mode and rule text are persisted across app restarts.
+
+A concrete storage example is in [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 ## What is implemented now
 
@@ -74,6 +79,7 @@ A concrete example is in [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 - ZIP / 7z / RAR listing and extraction through SharpCompress.
 - Conservative work-level attribution with manual fallback.
 - Typed direct call into the original `SubRenamer.Core`.
+- Core automatic Diff, manual-rule and direct Regex matching modes.
 - One-to-many subtitle output with recognized language suffixes such as `chs` / `cht`.
 - Preview and no-overwrite conflict protection.
 - Background scanning / processing to avoid blocking the Android UI.
@@ -85,10 +91,10 @@ The Android UI is still intentionally small. It does **not** yet expose the full
 
 ## Important missing features
 
-The largest functional gaps are not in the Core algorithm but in the Android shell around it:
+The largest remaining gaps are around recovery and output control rather than the Core matching engine itself:
 
-- manual/regex matching modes and editors;
 - per-item match correction / exclusion;
+- richer manual/regex sample testing/editor UX;
 - language filtering and related subtitle-output settings;
 - a real settings surface;
 - subtitle synchronization through FFsubsync / FFmpeg.
