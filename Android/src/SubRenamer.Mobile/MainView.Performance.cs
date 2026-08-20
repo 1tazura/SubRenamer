@@ -172,7 +172,19 @@ public partial class MainView
         try
         {
             StatusText.Text = $"撤销上次处理：并行校验并删除 {batch.Files.Count} 个由本应用创建的字幕…";
-            result = await Task.Run(() => _undo.UndoLastAsync(root, batch));
+
+            // A just-applied plan already owns the exact IStorageFolder for the
+            // destination. Reusing it avoids walking Download/Torrent again.
+            // After process restart _currentPlan is null, so persisted undo still
+            // falls back to relative-path resolution inside UndoService.
+            var resolvedTarget = _currentPlan?.Target.RelativePath == batch.TargetRelativePath
+                ? _currentPlan.Target.Folder
+                : null;
+
+            result = await Task.Run(() => _undo.UndoLastAsync(
+                root,
+                batch,
+                resolvedTarget: resolvedTarget));
 
             await RefreshUndoBatchAsync();
             rebuildPreview = result.Deleted > 0 &&
