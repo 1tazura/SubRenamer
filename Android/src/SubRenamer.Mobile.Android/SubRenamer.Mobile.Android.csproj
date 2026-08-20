@@ -4,17 +4,18 @@
     <TargetFramework>net10.0-android</TargetFramework>
     <SupportedOSPlatformVersion>23</SupportedOSPlatformVersion>
     <ApplicationId>io.github.subrenamer.mobile</ApplicationId>
-    <ApplicationVersion>24</ApplicationVersion>
-    <ApplicationDisplayVersion>0.1.23</ApplicationDisplayVersion>
+    <ApplicationVersion>25</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.24</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <AndroidUseLatestPlatformSdk>true</AndroidUseLatestPlatformSdk>
+    <RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
 
     <!--
-      GitHub Actions produces an APK for sideloading, not an IDE fast-deploy
-      payload. Debug builds otherwise default to Fast Deployment and can omit
-      managed assemblies from the APK, making a standalone install abort in
-      libmonodroid before managed/Avalonia code starts.
+      GitHub Actions produces a directly sideloadable APK for modern ARM64 Android
+      phones. The previous universal package carried a second full x86_64 copy of
+      the .NET/Avalonia runtime, nearly doubling APK size for no benefit on the
+      real-device target used by this port.
     -->
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
   </PropertyGroup>
