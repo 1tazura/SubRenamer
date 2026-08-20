@@ -103,7 +103,7 @@ public sealed class ArchiveService
 
         public IEnumerable<IArchiveEntry> Entries => _archive.Entries;
 
-        public async Task CopyEntryToAsync(
+        public async Task<CopyFingerprint> CopyEntryToAsync(
             string entryKey,
             Stream destination,
             CancellationToken cancellationToken = default)
@@ -112,7 +112,7 @@ public sealed class ArchiveService
                 throw new FileNotFoundException($"Archive entry was not found: {entryKey}");
 
             using var source = entry.OpenEntryStream();
-            await source.CopyToAsync(destination, cancellationToken);
+            return await StreamCopyService.CopyWithSha256Async(source, destination, cancellationToken);
         }
 
         public async ValueTask DisposeAsync()
