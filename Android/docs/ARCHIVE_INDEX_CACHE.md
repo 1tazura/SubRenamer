@@ -15,6 +15,10 @@ After a successful archive inspection the app stores:
 
 An empty entry list is a **negative cache entry**: the archive was fully opened and was confirmed to contain no supported subtitles.
 
+Starting in v0.1.20, the same signature can also store one deliberately narrow **stable rejection**: SharpCompress `ArchiveOperationException` whose message starts with `Cannot determine compressed stream type`. This means the unchanged bytes were actually tried once and cannot be parsed as a supported archive stream, even though the filename ends in `.zip`, `.7z` or `.rar`.
+
+Stable rejection is intentionally not a general exception cache. Permission errors, provider failures, I/O failures, cancellation, truncated reads and other potentially transient errors are retried on the next scan.
+
 ## Hit policy
 
 A cached result is reused only when all of the following match the current file:
@@ -27,6 +31,8 @@ If size or modification time is missing, unavailable, or the metadata call fails
 
 New or changed archives are therefore fully validated exactly as before. Automatic work attribution continues to receive the same real archive-entry names it would receive from a full eager rescan.
 
+For a stable rejection, changing either size or modification time invalidates the rejection and forces a real parse attempt again. If usable metadata is unavailable, the rejection is not cached at all.
+
 ## Download authorization changes
 
 The cache belongs to the currently authorized Download tree. When the persisted SAF Download bookmark changes, the archive-index cache is cleared before the new bookmark is saved. The first scan under the new authorization is therefore a cold eager scan and builds a new cache snapshot.
@@ -35,7 +41,7 @@ Re-authorizing the exact same persisted bookmark does not clear the cache.
 
 ## Persistence lifecycle
 
-Each completed scan writes one coherent cache snapshot containing only archives that were successfully validated or reused during that scan. Archives removed from `Download` are naturally pruned. Failed validations and files that do not expose usable metadata are not retained as reusable entries, so they are retried on the next scan.
+Each completed scan writes one coherent cache snapshot containing only archives that were successfully validated/reused or deliberately stable-rejected under a complete signature. Archives removed from `Download` are naturally pruned. Transient failures and files that do not expose usable metadata are not retained as reusable entries, so they are retried on the next scan.
 
 Source archives themselves are never modified or removed by this cache.
 
@@ -44,46 +50,46 @@ Source archives themselves are never modified or removed by this cache.
 The scan performance text reports archive work as:
 
 - total archive count;
-- cache hits;
-- validation failures;
+- normal validated cache hits;
+- stable exclusions and how many were reused from cache;
+- transient validation failures;
 - successful actual re-indexes.
 
-A failed archive is now named in the same diagnostic text together with a compact exception type/message. This closes a previous accounting gap where a failed `ListSubtitleEntriesAsync()` call could be swallowed and the archive would appear in the total count but in neither the cache-hit nor re-index count.
-
-For example, a warm scan may report:
+The completed-scan accounting invariant is:
 
 ```text
-共 25 包，缓存命中 24 包，索引失败 1 包 [broken-pack.rar: InvalidOperationException: ...]，成功重索引 0 包
+total = validated cache hits + successful re-indexes + stable exclusions + transient failures
 ```
 
-The accounting invariant for a completed scan is therefore:
+For the real-device case that motivated v0.1.20, the 25th `.zip` was:
 
 ```text
-total = cache hits + successful re-indexes + failed validations
+支付宝交易明细(20251213-20260313).zip
+ArchiveOperationException: Cannot determine compressed stream type.
 ```
+
+v0.1.19 correctly surfaced this instead of silently losing it from the counts. v0.1.20 attempts it once under the current signature, remembers the deterministic unsupported-stream result, and later reports it as a cached stable exclusion rather than opening it again every warm scan.
 
 Metadata absence is not itself a validation failure. It disables cache reuse for that file and forces a normal full archive inspection; a successful inspection still counts as a re-index.
 
-## Top-level scan scheduling
+## Download-root scheduling
 
-Starting in v0.1.19, the public video-target scan and subtitle-source scan each dispatch their core SAF work to a separate worker. The UI still starts both operations together and waits with `Task.WhenAll`, but synchronous provider/IPC work performed before an `await` can no longer pin both scan chains to the same worker.
+v0.1.19 proved on the measured device that putting Torrent traversal and subtitle scanning on independent workers produced real overlap: with a warm archive cache the scan fell from about 2797 ms to about 2134 ms.
 
-This change does **not** increase `ArchiveScanConcurrency`: archive validation remains bounded at 2. The purpose is only to allow the video traversal and subtitle-source scan to overlap when the Android storage provider permits it.
+That measurement also showed both branches independently enumerating the same `Download` root at roughly the same time. v0.1.20 removes that duplicate provider work. The main UI scan now:
 
-Real-device timing remains the authority. Android `DocumentsProvider` implementations may still serialize requests internally, so concurrency is not assumed to guarantee a speedup.
+1. enumerates direct children of `Download` once;
+2. captures the `Torrent` folder plus archive/loose-subtitle candidates from that one cursor;
+3. runs Torrent **subtree** traversal and archive indexing on independent workers;
+4. joins them before work attribution.
 
-## Real-device baseline before v0.1.19
+`ArchiveScanConcurrency` remains 2. The shared-root change reduces duplicated SAF/provider work; it does not weaken eager validation or increase archive fan-out.
 
-On the measured 25-archive workload, v0.1.18 showed:
-
-- cold scan: archive indexing about 5303 ms, total about 7762 ms;
-- immediate warm scan: archive indexing about 422 ms, total about 2797 ms;
-- warm-cache accounting: 24 cache hits out of 25 archives.
-
-The reduction from about 5.3 s to about 0.42 s validates the persistent cache itself. The 25-versus-24 accounting mismatch motivated the explicit failure diagnostics added in v0.1.19.
+Real-device timing remains the authority because Android `DocumentsProvider` implementations can serialize or contend internally.
 
 ## Version history
 
 - **v0.1.17** introduced persistent positive/negative archive index caching while preserving eager validation.
 - **v0.1.18** completed cache invalidation on Download bookmark changes, added cache-focused tests, and surfaced hit/re-index counts.
-- **v0.1.19** gives video/subtitle scans independent workers and makes archive validation failures visible and fully accounted for.
+- **v0.1.19** gave video/subtitle scans independent workers and made archive validation failures visible and fully accounted for.
+- **v0.1.20** adds conservative stable-rejection caching for the observed unsupported-stream case and replaces the two competing `Download` root enumerations with one shared snapshot before parallel downstream work.
