@@ -54,6 +54,10 @@ public sealed class ArchiveIndexCacheStore
             }
             return output;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             // A corrupt/incompatible cache is never allowed to block scanning.
@@ -65,19 +69,19 @@ public sealed class ArchiveIndexCacheStore
         IEnumerable<ArchiveIndexCacheRecord> records,
         CancellationToken cancellationToken = default)
     {
-        var dir = Path.GetDirectoryName(_path);
-        if (!string.IsNullOrWhiteSpace(dir))
-            Directory.CreateDirectory(dir);
-
-        var snapshot = records
-            .GroupBy(x => x.Identity, StringComparer.Ordinal)
-            .Select(x => x.Last())
-            .OrderBy(x => x.Identity, StringComparer.Ordinal)
-            .ToArray();
-
         var tempPath = _path + ".tmp";
         try
         {
+            var dir = Path.GetDirectoryName(_path);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+
+            var snapshot = records
+                .GroupBy(x => x.Identity, StringComparer.Ordinal)
+                .Select(x => x.Last())
+                .OrderBy(x => x.Identity, StringComparer.Ordinal)
+                .ToArray();
+
             await using (var stream = File.Create(tempPath))
             {
                 await JsonSerializer.SerializeAsync(
@@ -88,6 +92,15 @@ public sealed class ArchiveIndexCacheStore
             }
 
             File.Move(tempPath, _path, true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Cache persistence is an optimization only. A failure must never
+            // turn an otherwise successful full scan into a user-visible error.
         }
         finally
         {
