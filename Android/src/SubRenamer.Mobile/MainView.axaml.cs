@@ -16,12 +16,15 @@ public partial class MainView : UserControl
     private readonly AttributionService _attribution = new();
     private readonly PlanBuilder _planner = new(new SubRenamerCoreBridge());
     private readonly ApplyService _apply;
+    private readonly UndoService _undo;
 
     private readonly ObservableCollection<SourceCard> _cards = [];
     private IReadOnlyList<VideoTarget> _targets = [];
     private Avalonia.Platform.Storage.IStorageFolder? _downloadRoot;
     private MatchPlan? _currentPlan;
+    private UndoBatchRecord? _undoBatch;
     private bool _suppressCandidateChanged;
+    private bool _busy;
 
     public MainView()
     {
@@ -29,6 +32,7 @@ public partial class MainView : UserControl
         _storage = new StorageAccessService(_settings);
         _scanner = new ScanService(_archives);
         _apply = new ApplyService(_archives);
+        _undo = new UndoService(_settings);
         SourceList.ItemsSource = _cards;
 
         AttachedToVisualTree += async (_, _) =>
@@ -50,19 +54,38 @@ public partial class MainView : UserControl
                 RootText.Text = "尚未授权 Download";
                 StatusText.Text = "首次使用请点“选择 Download”；以后授权会被保存。";
                 ScanButton.IsEnabled = false;
+                UpdateUndoButton();
                 return;
             }
 
             RootText.Text = "已授权：Download";
             StatusText.Text = "已恢复 Download 授权。点“扫描字幕与视频”开始。";
             ScanButton.IsEnabled = true;
+            await RefreshUndoBatchAsync();
         }
         catch (Exception ex)
         {
             RootText.Text = "尚未授权 Download";
             ScanButton.IsEnabled = false;
             StatusText.Text = $"恢复授权失败：{ex.Message}。请重新选择 Download。";
+            UpdateUndoButton();
         }
+    }
+
+    private async Task RefreshUndoBatchAsync()
+    {
+        var settings = await _settings.LoadAsync();
+        _undoBatch = settings.LastUndoBatch is { Files.Count: > 0 }
+            ? settings.LastUndoBatch
+            : null;
+        UpdateUndoButton();
+    }
+
+    private void UpdateUndoButton()
+    {
+        var count = _undoBatch?.Files.Count ?? 0;
+        UndoButton.Content = count > 0 ? $"撤销上次处理 ({count} 项)" : "撤销上次处理";
+        UndoButton.IsEnabled = !_busy && _downloadRoot is not null && count > 0;
     }
 
     private async Task ScanAsync()
@@ -246,10 +269,32 @@ public partial class MainView : UserControl
                 ? ""
                 : Environment.NewLine + string.Join(Environment.NewLine, result.Errors.Select(x => "失败：" + x));
 
+            var undoWarning = "";
+            if (result.CreatedFiles.Count > 0)
+            {
+                try
+                {
+                    var batch = new UndoBatchRecord(
+                        plan.Target.RelativePath,
+                        DateTimeOffset.UtcNow,
+                        result.CreatedFiles
+                            .Select(x => new UndoFileRecord(x.DestinationName, x.Sha256))
+                            .ToArray());
+
+                    await _settings.SaveUndoBatchAsync(batch);
+                    _undoBatch = batch;
+                }
+                catch (Exception ex)
+                {
+                    _undoBatch = null;
+                    undoWarning = Environment.NewLine + $"警告：撤销记录保存失败：{ex.Message}";
+                }
+            }
+
             StatusText.Text = $"完成：{result.Applied} 成功，{result.Skipped} 跳过，{result.Errors.Count} 失败。";
             PreviewText.Text += Environment.NewLine + Environment.NewLine +
                                 $"应用结果：{result.Applied} 成功 / {result.Skipped} 跳过 / {result.Errors.Count} 失败" +
-                                extra;
+                                extra + undoWarning;
 
             if (SourceList.SelectedItem is SourceCard card)
                 card.State = $"已写入 {result.Applied}";
@@ -262,6 +307,58 @@ public partial class MainView : UserControl
         finally
         {
             SetBusy(false);
+            UpdateUndoButton();
+        }
+    }
+
+    private async void Undo_Click(object? sender, RoutedEventArgs e)
+    {
+        var root = _downloadRoot;
+        var batch = _undoBatch;
+        if (root is null || batch is null || batch.Files.Count == 0)
+            return;
+
+        UndoResult? result = null;
+        var rebuildPreview = false;
+        SetBusy(true);
+        ApplyButton.IsEnabled = false;
+
+        try
+        {
+            StatusText.Text = $"撤销上次处理：检查并删除 {batch.Files.Count} 个由本应用创建的字幕…";
+            result = await Task.Run(() => _undo.UndoLastAsync(root, batch));
+
+            await RefreshUndoBatchAsync();
+            rebuildPreview = result.Deleted > 0 &&
+                             _currentPlan?.Target.RelativePath == batch.TargetRelativePath;
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"撤销失败：{ex.Message}";
+            PreviewText.Text += Environment.NewLine + ex;
+        }
+        finally
+        {
+            SetBusy(false);
+            UpdateUndoButton();
+        }
+
+        if (result is null)
+            return;
+
+        if (rebuildPreview)
+            await BuildPreviewAsync();
+
+        var errorText = result.Errors.Count == 0
+            ? ""
+            : $"，{result.Errors.Count} 个错误";
+        StatusText.Text =
+            $"撤销完成：{result.Deleted} 已删除，{result.Missing} 已不存在，{result.Changed} 已修改而保留{errorText}。";
+
+        if (result.Errors.Count > 0)
+        {
+            PreviewText.Text += Environment.NewLine + Environment.NewLine +
+                                string.Join(Environment.NewLine, result.Errors.Select(x => "撤销失败：" + x));
         }
     }
 
@@ -283,6 +380,7 @@ public partial class MainView : UserControl
 
             RootText.Text = "已授权：Download";
             StatusText.Text = "Download 授权已恢复。点“扫描字幕与视频”开始。";
+            await RefreshUndoBatchAsync();
         }
         catch (Exception ex)
         {
@@ -293,6 +391,7 @@ public partial class MainView : UserControl
         finally
         {
             SetBusy(false);
+            UpdateUndoButton();
         }
     }
 
@@ -308,6 +407,7 @@ public partial class MainView : UserControl
                 return;
             }
 
+            _undoBatch = null;
             RootText.Text = "已授权：Download";
             StatusText.Text = "授权已保存。点“扫描字幕与视频”开始；不会自动扫描。";
         }
@@ -318,16 +418,19 @@ public partial class MainView : UserControl
         finally
         {
             SetBusy(false);
+            UpdateUndoButton();
         }
     }
 
     private void SetBusy(bool busy)
     {
+        _busy = busy;
         RestoreRootButton.IsEnabled = !busy;
         ChangeRootButton.IsEnabled = !busy;
         ScanButton.IsEnabled = !busy && _downloadRoot is not null;
         PreviewButton.IsEnabled = !busy;
         CandidateCombo.IsEnabled = !busy;
         SourceList.IsEnabled = !busy;
+        UpdateUndoButton();
     }
 }
