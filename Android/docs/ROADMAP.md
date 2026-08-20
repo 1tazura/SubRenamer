@@ -13,11 +13,21 @@ These are invariants, not optional features:
 - keep standalone APK validation in CI;
 - retain safe undo semantics: only delete outputs created by the app and unchanged since creation.
 
-## P1 — make automatic matching recoverable
+## P1 — make matching recoverable
 
-The current basic flow works, but users need an escape hatch when automatic matching is wrong or incomplete.
+### Core matching modes — implemented
 
-### Per-item correction / exclusion
+Android now exposes all Core matching paths needed for parity with the desktop matching engine:
+
+- automatic Diff mode;
+- desktop-compatible manual patterns where `$$` marks the key and `*` is a wildcard;
+- direct Regex mode using capture group 1 as the key;
+- persisted mode/rules;
+- preview before apply.
+
+The first Android UI is intentionally compact rather than a literal port of the desktop rule-editor windows. Rich sample-file testing can be added later if needed.
+
+### Per-item correction / exclusion — next
 
 Add a touch-friendly editor for the generated plan:
 
@@ -26,22 +36,7 @@ Add a touch-friendly editor for the generated plan:
 - clearly identify unmatched/conflicting rows;
 - regenerate destination names safely after edits.
 
-This should come before advanced rule editors because it solves many real-world SP/OVA/NCOP cases with lower complexity.
-
-### Manual matching mode
-
-Expose the upstream Core manual matching mode in Android rather than reimplementing it.
-
-Requirements:
-
-- separate work-level attribution from episode-level matching UI;
-- support upstream manual video/subtitle rules;
-- show immediate preview before apply;
-- persist useful rules where appropriate.
-
-### Regex matching mode
-
-Expose `MatcherOptions.VideoRegex` / `SubtitleRegex` through a mobile editor with test feedback.
+This is now the main missing escape hatch for SP/OVA/NCOP and unusual packs after Manual/Regex support landed.
 
 ## P2 — language and output control
 
@@ -75,7 +70,8 @@ The first low-risk performance pass already reduces repeated SAF enumeration, ad
 
 Next steps should be measurement-driven:
 
-- expose elapsed time for video discovery, subtitle/archive discovery, attribution, preview and apply;
+- expose elapsed time for video discovery, subtitle/archive discovery, attribution, Core matching, plan generation and apply separately;
+- compare Diff vs Manual/Regex Core matching on the same real-world filename sets;
 - identify whether SAF `CreateFileAsync` is the dominant apply bottleneck;
 - if justified, add an Android-specific `DocumentsContract.CreateDocument` path to avoid redundant directory scans while preserving conflict guarantees;
 - optimize solid 7z extraction as a batch/streaming operation if repeated random extraction proves expensive.
