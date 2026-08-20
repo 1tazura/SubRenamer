@@ -68,10 +68,19 @@ Create a real Android settings page instead of continuing to hard-code policy in
 
 The first low-risk performance pass already reduces repeated SAF enumeration, adds bounded folder/archive concurrency and indexes archive entries.
 
+Preview diagnostics now separately report:
+
+- original `SubRenamer.Core` matching time;
+- target-folder SAF enumeration time;
+- Android plan-generation time;
+- total preview-backend time.
+
+Use those measurements before changing algorithms or increasing concurrency. The first real-device comparison reported no obvious wall-clock difference between Diff and Manual/Regex, which makes common post-Core work a plausible bottleneck until timings say otherwise.
+
 Next steps should be measurement-driven:
 
-- expose elapsed time for video discovery, subtitle/archive discovery, attribution, Core matching, plan generation and apply separately;
-- compare Diff vs Manual/Regex Core matching on the same real-world filename sets;
+- extend timing to video discovery, subtitle/archive discovery, attribution and apply when needed;
+- identify whether target-folder SAF enumeration dominates preview latency;
 - identify whether SAF `CreateFileAsync` is the dominant apply bottleneck;
 - if justified, add an Android-specific `DocumentsContract.CreateDocument` path to avoid redundant directory scans while preserving conflict guarantees;
 - optimize solid 7z extraction as a batch/streaming operation if repeated random extraction proves expensive.
