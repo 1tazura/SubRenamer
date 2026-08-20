@@ -76,7 +76,7 @@ On the 25-video / 50-subtitle test workload, preview work is already small:
 - target-folder snapshot: roughly 0.3 s;
 - total preview backend: roughly 0.6–0.8 s.
 
-The scan profile identified the real wall-clock problem:
+The original scan profile identified the real wall-clock problem:
 
 - Torrent traversal: roughly 1.9–2.0 s;
 - Download-root enumeration: roughly 9.0–9.6 s;
@@ -84,13 +84,13 @@ The scan profile identified the real wall-clock problem:
 - work attribution: roughly 0.7 s;
 - total scan: roughly 16.1 s.
 
-The largest cost is therefore not `SubRenamer.Core` and not primarily recursive Torrent discovery. It is enumerating a large SAF `Download` tree and then opening all archive candidates.
-
 ### v0.1.12 SAF-name optimization
 
 Avalonia Android `GetItemsAsync()` already returns a document id and MIME type in one cursor, but `IStorageItem.Name` performs another `ContentResolver` metadata query. Calling `.Name` for every item in a large `Download` directory turns one enumeration into hundreds of extra IPC/provider queries.
 
 For Android's `com.android.externalstorage.documents` provider, the document id embedded in `IStorageItem.Path` already contains the item path/name. v0.1.12 derives the display name from that URI when possible and falls back to `IStorageItem.Name` for other providers/platforms.
+
+Real-device measurement reduced Download-root enumeration from roughly 9 seconds to roughly 1.1 seconds, and the full eager scan from roughly 16 seconds to roughly 6.5 seconds.
 
 This optimization is applied to:
 
@@ -102,18 +102,22 @@ This optimization is applied to:
 - work attribution;
 - loose-subtitle lookup.
 
-The existing scan timing remains in place so the real-device effect can be measured directly.
+### Archive-validation decision
 
-### Next structural step
+A later experiment deferred archive inspection until the user selected an archive. It reduced the initial scan to roughly 2.5 seconds, but it also meant arbitrary non-subtitle ZIP/7z/RAR files in `Download` had to appear as unverified candidates and weakened the automatic `source -> torrent target` workflow until the user made a manual source choice.
 
-After v0.1.12 measurements:
+That trade-off was rejected. The Android workflow intentionally restores **eager validation of archive contents during scanning**: only archives that actually contain supported subtitle entries become subtitle sources, and their internal filenames remain immediately available to automatic work attribution.
 
-- if Download-root enumeration collapses as expected but archive indexing remains several seconds, implement **lazy archive indexing** so initial discovery lists archive files without opening all of them;
-- if Torrent traversal remains material after the same name-query reduction, consider a persistent target index / fast refresh plus explicit full rescan;
-- identify whether SAF `CreateFileAsync` is the dominant apply bottleneck only after scan latency is acceptable;
+The extra few seconds are currently considered preferable to sacrificing automatic source discovery. Do not reintroduce lazy archive discovery merely to improve the headline scan time unless the automatic-selection semantics can be preserved.
+
+### Remaining performance work
+
+- Torrent traversal is now roughly 1.1 s on the measured device and is not urgent.
+- Eager indexing of 25 archives remains roughly 4 seconds; optimize this only in ways that preserve validated-source discovery and automatic attribution (for example metadata/index caching or incremental revalidation).
+- identify whether SAF `CreateFileAsync` is the dominant apply bottleneck only after higher-value functionality work;
 - optimize solid 7z extraction as a batch/streaming operation if repeated random extraction proves expensive.
 
-The fixed `Download` / `Torrent` storage boundary remains useful. It should only be replaced if the optimized SAF path is still intrinsically too slow; do not shift routine folder-selection work back to the user before exhausting cheap provider-query reductions and lazy indexing.
+The fixed `Download` / `Torrent` storage boundary remains useful. Do not shift routine folder-selection work back to the user solely for scan speed.
 
 Avoid increasing concurrency blindly; Android `DocumentsProvider` / storage backends can regress under excessive parallelism.
 
