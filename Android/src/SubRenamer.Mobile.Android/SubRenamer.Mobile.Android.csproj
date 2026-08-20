@@ -9,12 +9,15 @@
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <AndroidUseLatestPlatformSdk>true</AndroidUseLatestPlatformSdk>
+    <RuntimeIdentifier>android-arm64</RuntimeIdentifier>
+    <RunAOTCompilation>false</RunAOTCompilation>
 
     <!--
-      The project stays runtime-neutral so local/IDE builds are not pinned to one
-      architecture. CI produces the sideloadable phone APK with
-      -p:RuntimeIdentifier=android-arm64, avoiding the duplicate x86_64 runtime
-      payload that nearly doubled the previous universal APK.
+      The sideload target for this port is modern ARM64 Android hardware. A
+      single RuntimeIdentifier keeps restore/build/package on the same ABI and
+      avoids carrying a second x86_64 copy of the .NET/Avalonia runtime.
+      AOT stays disabled so the compact build preserves the current JIT runtime
+      behavior and remains cross-buildable on the x64 GitHub Actions runner.
     -->
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
   </PropertyGroup>
