@@ -66,15 +66,15 @@ Create a real Android settings page instead of continuing to hard-code policy in
 
 ## P3 — performance and observability
 
-The first low-risk performance pass reduced repeated SAF enumeration, added bounded folder/archive concurrency and made preview/scan timing visible on-device. Later passes added persistent archive indexing, real top-level overlap and apply-phase diagnostics.
+The generic performance pass is now accepted on the representative 25-archive / 50-subtitle workload. Revisit this area only when a new device/provider/archive format exposes a specific measured regression rather than continuing unconditional concurrency tuning.
 
 ### Preview baseline
 
 On the measured 25-video / 50-subtitle workload, preview work is already small:
 
 - Core Diff: roughly 20–80 ms;
-- target-folder snapshot: roughly 0.07–0.3 s depending on run;
-- total preview backend: roughly 0.15–0.8 s.
+- target-folder snapshot: roughly 0.04–0.3 s depending on run;
+- total preview backend: roughly 0.12–0.8 s.
 
 Preview is not currently a priority bottleneck.
 
@@ -124,45 +124,50 @@ The total closely matched `root/subtitle critical path + attribution` rather tha
 
 The same run identified the previously unexplained 25th archive as an unrelated file named `支付宝交易明细(20251213-20260313).zip`, rejected by SharpCompress with `ArchiveOperationException: Cannot determine compressed stream type.`
 
-#### v0.1.20 scan cleanup
+#### v0.1.20 scan cleanup and acceptance
 
-The main scan now enumerates direct children of `Download` exactly once, capturing both the `Torrent` folder and direct subtitle/archive candidates. Torrent **subtree** traversal and archive indexing then run in parallel. This removes the two competing root enumerations observed in v0.1.19.
+The main scan enumerates direct children of `Download` exactly once, capturing both the `Torrent` folder and direct subtitle/archive candidates. Torrent **subtree** traversal and archive indexing then run in parallel. This removes the two competing root enumerations observed in v0.1.19.
 
-The known deterministic unsupported-stream error can now be stored as a conservative stable rejection under the same identity/size/mtime signature. Unchanged non-archive bytes therefore are not reopened every warm scan. Transient errors remain uncached and are retried.
+The known deterministic unsupported-stream error is stored as a conservative stable rejection under the same identity/size/mtime signature. Unchanged non-archive bytes therefore are not reopened every warm scan. Transient errors remain uncached and are retried.
+
+Representative warm scans after the stable rejection is cached have measured roughly 1.1–1.6 seconds total, with Torrent subtree traversal around 0.1–0.2 seconds and archive indexing around 0.2–0.4 seconds. Provider/root enumeration variability is now the largest scan component and is not worth weakening the fixed SAF workflow to chase further.
 
 See `ARCHIVE_INDEX_CACHE.md` for the exact policy.
 
 ### Apply / processing performance
 
-As scanning approached roughly two seconds, the actual subtitle placement step became comparatively prominent. v0.1.20 therefore instruments the apply path rather than guessing at the next bottleneck.
+v0.1.20 instrumentation on a 50-subtitle archive workload writing 22,064,348 bytes measured:
 
-The UI reports cumulative time for:
+- destination creation: 6333 ms;
+- destination open: 1708 ms;
+- transfer / decompression / SHA-256: 2546 ms;
+- `ApplyService` total: 10,872 ms;
+- click-to-complete: 10,912 ms.
 
-- target-directory no-overwrite recheck;
-- archive/source preparation;
-- destination creation;
-- destination open;
-- loose-source open;
-- transfer / archive decompression / SHA-256 / write;
-- destination close/commit;
-- undo-journal persistence;
-- full click-to-result wall time.
+This made SAF destination preparation the dominant actionable bottleneck. v0.1.21 therefore introduced a bounded look-ahead pipeline that prepares up to four destination files concurrently while keeping archive extraction, hashing and actual subtitle writes strictly sequential.
 
-Two low-risk changes are already included:
+On the same representative workload v0.1.21 measured:
 
-- copy/hash and non-seekable archive staging use 256 KiB buffers to reduce provider/native calls;
-- redundant explicit `FlushAsync` immediately before output-stream disposal was removed; close/dispose remains the required commit boundary.
+- destination creation cumulative: 3914 ms;
+- destination open cumulative: 858 ms;
+- actual destination-ready wait visible to the sequential consumer: 538 ms;
+- transfer / decompression / SHA-256: 907 ms;
+- `ApplyService` total: 1728 ms;
+- click-to-complete: 1762 ms;
+- 50 successful outputs / 0 skipped / 0 failed.
 
-No blind write concurrency or parallel extraction has been introduced. If real-device timings show `CreateFileAsync`/open/close dominates, bounded destination-side pipelining can be evaluated. If transfer/decompression dominates—especially on solid 7z sources—optimize the archive extraction strategy instead of increasing SAF concurrency.
+The cumulative provider timings remain large because they overlap. The user-visible Apply wall clock fell from about 10.9 seconds to about 1.7 seconds. Concurrency 4 is therefore the accepted generic default: increasing it further has a small theoretical upside compared with additional provider pressure and a larger pre-created cleanup window.
+
+Transfer/decompression/SHA is now the largest remaining measured phase, but it represents real data work. SHA-256 is intentionally retained for safe Undo and is already computed in the same one-pass 256 KiB copy loop. Do not parallelize multiple entries from one SharpCompress session merely to reduce this counter; solid 7z sources in particular require format-specific measurement first.
 
 See `PROCESSING_PERFORMANCE.md`.
 
-### Remaining performance work
+### Remaining performance work — only when triggered by evidence
 
-- measure v0.1.20 warm scan after shared-root enumeration and cached stable rejection;
-- measure one representative real apply and use its phase breakdown to select the next optimization;
-- do not increase `ArchiveScanConcurrency` or output concurrency blindly;
-- investigate solid 7z batch/streaming extraction only if transfer/decompression is shown to dominate.
+- investigate solid-7z batch/streaming extraction if a real solid-7z source is measurably slow;
+- investigate Android-native document creation only if another provider/device shows substantial `等待目标就绪` again;
+- retain scan/apply diagnostics so regressions remain visible;
+- do not increase archive or output concurrency merely to improve synthetic counters.
 
 The fixed `Download` / `Torrent` storage boundary remains useful. Do not shift routine folder-selection work back to the user solely for scan speed.
 
