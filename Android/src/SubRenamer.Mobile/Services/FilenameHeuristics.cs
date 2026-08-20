@@ -28,7 +28,10 @@ public static partial class FilenameHeuristics
     [GeneratedRegex(@"[\p{L}\p{N}\p{IsCJKUnifiedIdeographs}]+")]
     private static partial Regex TokenRegex();
 
-    [GeneratedRegex(@"(?i)(?:^|[._\-\s])(zh-hans|zh-hant|chs|cht|sc|tc|zho|eng|en|jpn|ja)(?:$|[._\-\s])")]
+    // Subtitle groups very commonly write language markers as [CHS], [CHT],
+    // (CHS), etc. Brackets must therefore count as token boundaries just like
+    // dots, spaces, underscores and hyphens.
+    [GeneratedRegex(@"(?i)(?:^|[._\-\s\[\(\{])(zh-hans|zh-hant|chs|cht|sc|tc|zho|eng|en|jpn|ja)(?=$|[._\-\s\]\)\}])")]
     private static partial Regex LanguageRegex();
 
     public static IReadOnlyList<string> Tokens(string? text, bool stripEpisodes = true)
