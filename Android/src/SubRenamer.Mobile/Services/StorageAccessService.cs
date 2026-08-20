@@ -6,6 +6,8 @@ namespace SubRenamer.Mobile.Services;
 
 public sealed class StorageAccessService(SettingsStore settingsStore)
 {
+    private const string ExternalStorageDocumentsAuthority = "com.android.externalstorage.documents";
+
     public async Task<IStorageFolder?> RestoreDownloadAsync(
         Control owner,
         CancellationToken cancellationToken = default)
@@ -59,6 +61,58 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
         return folder;
     }
 
+    /// <summary>
+    /// Avalonia Android's GetItemsAsync cursor already contains the document id,
+    /// but IStorageItem.Name performs another ContentResolver query per item.
+    /// ExternalStorageProvider document ids contain the path/name, so derive the
+    /// display name from IStorageItem.Path when possible and fall back to Name on
+    /// other providers/platforms.
+    /// </summary>
+    public static string GetDisplayNameFast(IStorageItem item)
+    {
+        var parsed = TryGetExternalStorageDocumentName(item.Path);
+        return string.IsNullOrEmpty(parsed) ? item.Name : parsed;
+    }
+
+    public static string? TryGetExternalStorageDocumentName(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri ||
+            !string.Equals(uri.Scheme, "content", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(uri.Host, ExternalStorageDocumentsAuthority, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        string decoded;
+        try
+        {
+            decoded = Uri.UnescapeDataString(uri.AbsolutePath);
+        }
+        catch
+        {
+            return null;
+        }
+
+        const string marker = "/document/";
+        var markerIndex = decoded.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return null;
+
+        var documentId = decoded[(markerIndex + marker.Length)..].TrimEnd('/');
+        if (documentId.Length == 0)
+            return null;
+
+        var slash = documentId.LastIndexOf('/');
+        if (slash >= 0 && slash < documentId.Length - 1)
+            return documentId[(slash + 1)..];
+
+        // Tree/document roots such as primary:Download have no slash after the
+        // volume separator. This branch is mostly useful for folder lookups.
+        var colon = documentId.LastIndexOf(':');
+        if (colon >= 0 && colon < documentId.Length - 1)
+            return documentId[(colon + 1)..];
+
+        return null;
+    }
+
     public static async Task<IStorageFolder?> FindChildFolderAsync(
         IStorageFolder parent,
         string name,
@@ -67,7 +121,7 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
         await foreach (var item in parent.GetItemsAsync().WithCancellation(cancellationToken))
         {
             if (item is IStorageFolder folder &&
-                string.Equals(folder.Name, name, StringComparison.OrdinalIgnoreCase))
+                string.Equals(GetDisplayNameFast(folder), name, StringComparison.OrdinalIgnoreCase))
                 return folder;
         }
         return null;
@@ -81,7 +135,7 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
         await foreach (var item in parent.GetItemsAsync().WithCancellation(cancellationToken))
         {
             if (item is IStorageFile file &&
-                string.Equals(file.Name, name, StringComparison.Ordinal))
+                string.Equals(GetDisplayNameFast(file), name, StringComparison.Ordinal))
                 return file;
         }
         return null;
@@ -95,7 +149,7 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
         await foreach (var item in parent.GetItemsAsync().WithCancellation(cancellationToken))
         {
             if (item is IStorageFile file)
-                names.Add(file.Name);
+                names.Add(GetDisplayNameFast(file));
         }
         return names;
     }
@@ -108,7 +162,7 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
         await foreach (var item in parent.GetItemsAsync().WithCancellation(cancellationToken))
         {
             if (item is IStorageFile file)
-                files.TryAdd(file.Name, file);
+                files.TryAdd(GetDisplayNameFast(file), file);
         }
         return files;
     }
