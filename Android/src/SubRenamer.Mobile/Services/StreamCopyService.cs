@@ -7,13 +7,18 @@ public sealed record CopyFingerprint(long Length, string Sha256);
 
 public static class StreamCopyService
 {
+    // Subtitle placement is usually sequential and SAF-backed. A larger buffer
+    // cuts the number of provider/native read+write calls without changing the
+    // one-pass SHA-256 safety fingerprint.
+    private const int CopyBufferSize = 256 * 1024;
+
     public static async Task<CopyFingerprint> CopyWithSha256Async(
         Stream source,
         Stream destination,
         CancellationToken cancellationToken = default)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
         long total = 0;
 
         try
