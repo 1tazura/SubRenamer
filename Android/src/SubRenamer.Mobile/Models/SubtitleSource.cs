@@ -20,7 +20,8 @@ public sealed record SubtitleSource(
     IStorageFile? ArchiveFile,
     IReadOnlyList<IStorageFile> LooseFiles,
     IReadOnlyList<SubtitleEntryRef> Entries,
-    bool IsIndexed = true)
+    bool IsIndexed = true,
+    double DiscoveryAffinity = 0)
 {
     public int SubtitleCount => Entries.Count;
 }
