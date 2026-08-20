@@ -10,6 +10,8 @@ The app requests `/storage/emulated/0/Download` through Android SAF / Avalonia s
 
 The selected folder is bookmarked and restored on later launches. The implementation does not depend on converting SAF content URIs into real filesystem paths.
 
+On Android ExternalStorageProvider, Avalonia's item enumeration already returns document ids but reading `IStorageItem.Name` may issue a separate metadata query for each item. The mobile shell therefore derives display names from the `com.android.externalstorage.documents` document URI when possible and falls back to `IStorageItem.Name` on other providers/platforms. This is only a metadata/scan optimization; files are still opened, created and deleted through the authorized SAF objects.
+
 ## 2. Video-target discovery
 
 `ScanService` recursively discovers directories below `Download/Torrent`.
@@ -18,7 +20,7 @@ A `VideoTarget` is exactly a physical folder that directly contains one or more 
 
 This matters because torrent directory boundaries are semantically meaningful and because the app must not reorganize a seeding torrent.
 
-Folder enumeration uses **small bounded concurrency** to hide provider/storage latency without flooding Android `DocumentsProvider` with unbounded cursors/queries.
+Folder enumeration uses **small bounded concurrency** to hide provider/storage latency without flooding Android `DocumentsProvider` with unbounded cursors/queries. Names discovered during enumeration are reused rather than repeatedly querying Android metadata.
 
 ## 3. Subtitle-source discovery
 
@@ -27,7 +29,7 @@ Only direct children of `Download` are treated as subtitle sources in the curren
 - each `zip`, `7z`, or `rar` containing subtitle entries is one archive source;
 - loose subtitle files are grouped conservatively by normalized filename signature.
 
-Archive indexing also uses bounded concurrency. SharpCompress handles archive formats.
+Archive indexing also uses bounded concurrency. SharpCompress handles archive formats. The current eager archive indexing remains measurable separately so it can be replaced by lazy indexing if it remains a significant cost after SAF name-query removal.
 
 If a SAF source stream is not seekable, the archive may be spooled to **app-private temporary storage** solely to provide a seekable stream. Nothing temporary is created inside the torrent directory.
 
