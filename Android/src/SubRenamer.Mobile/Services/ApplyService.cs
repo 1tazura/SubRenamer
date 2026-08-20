@@ -28,7 +28,7 @@ public sealed class ApplyService(ArchiveService archiveService)
             plan.Target.Folder, cancellationToken);
 
         var looseByName = plan.Source.Kind == SubtitleSourceKind.LooseGroup
-            ? plan.Source.LooseFiles.ToDictionary(x => x.Name, StringComparer.Ordinal)
+            ? plan.Source.LooseFiles.ToDictionary(StorageAccessService.GetDisplayNameFast, StringComparer.Ordinal)
             : null;
 
         ArchiveService.ArchiveSession? archiveSession = null;
