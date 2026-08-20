@@ -13,7 +13,7 @@ public sealed class PlanBuilder(SubRenamerCoreBridge bridge)
     {
         var totalSw = Stopwatch.StartNew();
         var diagnostics = new List<string>();
-        var videoNames = target.Videos.Select(x => x.Name).ToArray();
+        var videoNames = target.Videos.Select(StorageAccessService.GetDisplayNameFast).ToArray();
         var subtitleNames = source.Entries.Select(x => x.DisplayName).ToArray();
 
         var coreSw = Stopwatch.StartNew();
