@@ -18,10 +18,11 @@ public sealed class AttributionService
 
         foreach (var target in targets)
         {
+            var videoNames = target.Videos.Select(StorageAccessService.GetDisplayNameFast).ToArray();
             var folderTokens = FilenameHeuristics.Tokens(Path.GetFileName(target.RelativePath))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var videoCommon = FilenameHeuristics.CommonTokens(target.Videos.Select(x => x.Name));
-            var targetEpisodes = FilenameHeuristics.EpisodeNumbers(target.Videos.Select(x => x.Name));
+            var videoCommon = FilenameHeuristics.CommonTokens(videoNames);
+            var targetEpisodes = FilenameHeuristics.EpisodeNumbers(videoNames);
 
             var titleScore = FilenameHeuristics.Jaccard(sourceArchiveTokens, folderTokens);
             var commonScore = FilenameHeuristics.Jaccard(sourceCommon, videoCommon);
