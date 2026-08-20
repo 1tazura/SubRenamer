@@ -2,7 +2,16 @@ using System.Text.Json;
 
 namespace SubRenamer.Mobile.Services;
 
-public sealed record AppSettings(string? DownloadBookmark = null);
+public sealed record UndoFileRecord(string DestinationName, string Sha256);
+
+public sealed record UndoBatchRecord(
+    string TargetRelativePath,
+    DateTimeOffset CreatedAtUtc,
+    IReadOnlyList<UndoFileRecord> Files);
+
+public sealed record AppSettings(
+    string? DownloadBookmark = null,
+    UndoBatchRecord? LastUndoBatch = null);
 
 public sealed class SettingsStore
 {
@@ -51,5 +60,36 @@ public sealed class SettingsStore
             settings,
             new JsonSerializerOptions { WriteIndented = true },
             cancellationToken);
+    }
+
+    public async Task SaveDownloadBookmarkAsync(
+        string bookmark,
+        CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        // A newly selected SAF root may point at a different Download tree.
+        // Never carry an undo journal across roots.
+        await SaveAsync(current with
+        {
+            DownloadBookmark = bookmark,
+            LastUndoBatch = null,
+        }, cancellationToken);
+    }
+
+    public async Task SaveUndoBatchAsync(
+        UndoBatchRecord batch,
+        CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        await SaveAsync(current with { LastUndoBatch = batch }, cancellationToken);
+    }
+
+    public async Task ClearUndoBatchAsync(CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        if (current.LastUndoBatch is null)
+            return;
+
+        await SaveAsync(current with { LastUndoBatch = null }, cancellationToken);
     }
 }
