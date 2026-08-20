@@ -155,4 +155,63 @@ public partial class MainView
             UpdateUndoButton();
         }
     }
+
+    private async void UndoInstrumented_Click(object? sender, RoutedEventArgs e)
+    {
+        var root = _downloadRoot;
+        var batch = _undoBatch;
+        if (root is null || batch is null || batch.Files.Count == 0)
+            return;
+
+        UndoResult? result = null;
+        var rebuildPreview = false;
+        var userWatch = Stopwatch.StartNew();
+        SetBusy(true);
+        ApplyButton.IsEnabled = false;
+
+        try
+        {
+            StatusText.Text = $"撤销上次处理：并行校验并删除 {batch.Files.Count} 个由本应用创建的字幕…";
+            result = await Task.Run(() => _undo.UndoLastAsync(root, batch));
+
+            await RefreshUndoBatchAsync();
+            rebuildPreview = result.Deleted > 0 &&
+                             _currentPlan?.Target.RelativePath == batch.TargetRelativePath;
+        }
+        catch (Exception ex)
+        {
+            userWatch.Stop();
+            StatusText.Text = $"撤销失败：{ex.Message}";
+            PreviewText.Text += Environment.NewLine + ex;
+        }
+        finally
+        {
+            SetBusy(false);
+            UpdateUndoButton();
+        }
+
+        if (result is null)
+            return;
+
+        if (rebuildPreview)
+            await BuildPreviewAsync();
+
+        userWatch.Stop();
+        var errorText = result.Errors.Count == 0
+            ? ""
+            : $"，{result.Errors.Count} 个错误";
+        StatusText.Text =
+            $"撤销完成：{result.Deleted} 已删除，{result.Missing} 已不存在，{result.Changed} 已修改而保留{errorText}；" +
+            $"点击到完成 {userWatch.Elapsed.TotalMilliseconds:F0} ms。";
+
+        PreviewText.Text += Environment.NewLine + Environment.NewLine +
+                            result.Performance +
+                            $"；点击到完成 {userWatch.Elapsed.TotalMilliseconds:F0} ms。";
+
+        if (result.Errors.Count > 0)
+        {
+            PreviewText.Text += Environment.NewLine +
+                                string.Join(Environment.NewLine, result.Errors.Select(x => "撤销失败：" + x));
+        }
+    }
 }
