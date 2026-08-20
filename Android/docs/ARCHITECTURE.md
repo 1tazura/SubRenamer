@@ -1,54 +1,145 @@
-# Architecture and safety boundary
+# Android architecture and safety boundary
 
-## 1. Discovery
+The Android port is a mobile shell around the original `SubRenamer.Core` matcher plus Android-specific storage discovery, work attribution, planning, placement and undo.
 
-`ScanService` recursively discovers *directories that directly contain videos* below `Download/Torrent`.
-Every target retains its own `IStorageFolder` and direct video list.
+The design intentionally separates **which work/source belongs together** from **which episode maps to which subtitle**.
 
-The root is never flattened into one global video collection.
+## 1. Storage authorization
 
-Subtitle sources are scanned only from direct children of `Download` in v1:
-- each zip/7z/rar is one source;
-- loose subtitle files are grouped conservatively by a normalized title signature.
+The app requests `/storage/emulated/0/Download` through Android SAF / Avalonia storage APIs.
 
-## 2. Work-level attribution
+The selected folder is bookmarked and restored on later launches. The implementation does not depend on converting SAF content URIs into real filesystem paths.
+
+## 2. Video-target discovery
+
+`ScanService` recursively discovers directories below `Download/Torrent`.
+
+A `VideoTarget` is exactly a physical folder that directly contains one or more supported video files. The hierarchy is not flattened into one global video list.
+
+This matters because torrent directory boundaries are semantically meaningful and because the app must not reorganize a seeding torrent.
+
+Folder enumeration uses **small bounded concurrency** to hide provider/storage latency without flooding Android `DocumentsProvider` with unbounded cursors/queries.
+
+## 3. Subtitle-source discovery
+
+Only direct children of `Download` are treated as subtitle sources in the current workflow:
+
+- each `zip`, `7z`, or `rar` containing subtitle entries is one archive source;
+- loose subtitle files are grouped conservatively by normalized filename signature.
+
+Archive indexing also uses bounded concurrency. SharpCompress handles archive formats.
+
+If a SAF source stream is not seekable, the archive may be spooled to **app-private temporary storage** solely to provide a seekable stream. Nothing temporary is created inside the torrent directory.
+
+## 4. Work-level attribution
 
 `AttributionService` ranks:
 
-`subtitle source -> one VideoTarget`
+```text
+subtitle source -> one VideoTarget
+```
 
-Evidence:
-- source/archive filename vs torrent-directory title tokens;
-- common archive-entry tokens vs common video-filename tokens;
+Evidence includes:
+
+- source/archive filename tokens vs torrent-directory title tokens;
+- common archive-entry tokens vs video filename tokens;
 - episode-set overlap at low weight only.
 
-A low score or a small winner margin does **not** trigger automatic placement. The UI asks for one target selection.
+Episode overlap alone is never enough to establish a work relationship.
 
-## 3. Episode-level mapping
+When confidence or winner margin is too low, Android requires one manual torrent-target selection rather than silently placing subtitles into a weak guess.
 
-After work-level attribution, only these two local filename sets are sent to original SubRenamer.Core:
+This selection is **not** the upstream desktop "manual matching mode". It only chooses the work/torrent directory. Episode mapping remains a separate layer.
+
+## 5. Episode-level mapping
+
+After work attribution, the Android shell passes only:
 
 - direct video filenames from the selected target directory;
-- subtitle filenames from the selected source.
+- subtitle display filenames from the selected source.
 
-The Android shell does not replace the upstream `diff → extract → mapping` algorithm.
+`SubRenamerCoreBridge` is a typed adapter around the original `SubRenamer.Core.Matcher.Execute` call.
 
-## 4. Plan
+The Android shell does not reimplement upstream `diff -> extract -> mapping` logic.
 
-`PlanBuilder` converts matched rows to destination filenames.
+Manual/Regex episode matching modes from upstream are not yet exposed in Android; see `FEATURES.md` / `ROADMAP.md`.
+
+## 6. Plan generation
+
+`PlanBuilder` converts matched rows into destination subtitle filenames.
+
+Rules currently include:
 
 - normal case: `video basename + subtitle extension`;
-- one video + several different subtitle extensions: each exact basename is safe;
-- several subtitles with the same extension: a recognized language suffix (`.chs`, `.cht`, `.en`, `.ja`) is preserved;
-- if a unique suffix cannot be determined, the item is a conflict and is not written.
+- multiple different subtitle extensions may coexist on the same video basename;
+- multiple subtitles with the same extension require a recognized unique language tag (for example `chs`, `cht`, `en`, `ja`), which is appended before the extension;
+- ambiguous duplicate source names or duplicate destination names become conflicts rather than writes;
+- existing destination files are never overwritten.
 
-Existing target files are conflicts and are not overwritten.
+Android SAF directory enumeration is comparatively expensive, so the target directory is snapshotted once into an in-memory filename set for planning instead of re-enumerating the same folder for every destination.
 
-## 5. Apply
+## 7. Apply
 
-`ApplyService` creates only subtitle files in the already-existing target folder.
+`ApplyService` creates subtitle files only inside the already-existing selected `VideoTarget` folder.
 
-It never calls `MoveAsync`, `DeleteAsync`, or rename-like operations on a video.
-Archive sources are spooled to app-private temporary storage only to give SharpCompress a seekable stream; no temporary directory is created under the torrent.
+Before applying, the target directory is snapshotted again to protect against files created after preview without performing one full SAF enumeration per planned subtitle.
 
-Source archives and source loose subtitles are retained.
+Archive sources are opened once for the batch. Archive entries are indexed by key so each subtitle lookup does not linearly rescan the archive entry collection.
+
+The service never performs video move/rename/delete operations.
+
+Source archives and loose source subtitles remain intact.
+
+## 8. Undo journal
+
+Android adds a one-level undo operation that upstream does not expose as a one-click command.
+
+For every subtitle successfully created by an apply batch, the app records:
+
+- target relative path;
+- destination filename;
+- SHA-256 of the exact bytes written.
+
+The record is persisted in app settings so undo survives an app restart.
+
+`UndoService` resolves the recorded target directory, reopens each recorded destination and recomputes SHA-256 before deletion.
+
+A file is deleted only when its current content still matches the app-created content. If the file was edited or replaced after creation, it is preserved and reported as changed.
+
+Undo never targets:
+
+- video files;
+- source subtitle archives;
+- loose source subtitle files;
+- unrelated pre-existing destination files.
+
+A later successful processing batch replaces the previous one-level undo journal.
+
+## 9. UI / execution boundary
+
+Long storage and archive operations run away from the Avalonia UI thread. This was required to avoid Android ANRs during SAF scanning and processing.
+
+The main screen currently orchestrates:
+
+```text
+authorize Download
+  -> scan targets/sources
+  -> choose source and target attribution
+  -> build Core preview
+  -> apply subtitle outputs
+  -> optional undo
+```
+
+The current UI is intentionally small and does not yet expose the complete upstream desktop editing/rule/settings toolset.
+
+## 10. Hard safety invariants
+
+The following should be treated as architectural constraints, not casual preferences:
+
+1. Torrent video files are read-only inputs.
+2. Existing destination subtitles are not overwritten.
+3. Source subtitle material is retained.
+4. No extra organization folder is created inside a torrent target.
+5. Weak work attribution requires user confirmation.
+6. Episode matching remains delegated to upstream Core unless explicitly reviewed otherwise.
+7. Undo deletes only content-verified outputs created by Android.
