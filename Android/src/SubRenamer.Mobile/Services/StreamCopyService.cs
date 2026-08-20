@@ -7,10 +7,7 @@ public sealed record CopyFingerprint(long Length, string Sha256);
 
 public static class StreamCopyService
 {
-    // Subtitle placement is usually sequential and SAF-backed. A larger buffer
-    // cuts the number of provider/native read+write calls without changing the
-    // one-pass SHA-256 safety fingerprint.
-    private const int CopyBufferSize = 256 * 1024;
+    private const int BufferSize = 256 * 1024;
 
     public static async Task<CopyFingerprint> CopyWithSha256Async(
         Stream source,
@@ -18,7 +15,7 @@ public static class StreamCopyService
         CancellationToken cancellationToken = default)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         long total = 0;
 
         try
@@ -31,6 +28,34 @@ public static class StreamCopyService
 
                 hash.AppendData(buffer, 0, read);
                 await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                total += read;
+            }
+
+            return new CopyFingerprint(total, Convert.ToHexString(hash.GetHashAndReset()));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    public static async Task<CopyFingerprint> ComputeSha256Async(
+        Stream source,
+        CancellationToken cancellationToken = default)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        long total = 0;
+
+        try
+        {
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+                if (read == 0)
+                    break;
+
+                hash.AppendData(buffer, 0, read);
                 total += read;
             }
 
