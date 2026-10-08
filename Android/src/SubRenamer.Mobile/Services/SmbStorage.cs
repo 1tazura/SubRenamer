@@ -89,6 +89,7 @@ public sealed class SmbHandleStream : Stream
     {
         ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
         _connection.Check(SmbNative.sr_stat_handle(context, _handle, out var stat), "文件身份");
+        if (stat.Inode == 0) throw new IOException("服务器未提供可靠字幕文件身份。");
         return stat.Identity;
     });
     internal SmbHandleStream(SmbConnection connection, IntPtr handle, int mode)

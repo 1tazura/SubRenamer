@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -11,7 +12,7 @@
 #include <smb2/libsmb2-raw.h>
 
 struct sr_connection { struct smb2_context *smb; };
-struct sr_reply { int done; int result; int compound; struct smb2fh *fh; };
+struct sr_reply { int done; int result; int compound; uint32_t volume; struct smb2fh *fh; };
 struct sr_stat { uint64_t ino, birth, birth_ns, size; uint32_t type, attributes; };
 static void stat_copy(struct sr_stat *out, const struct smb2_stat_64 *s) {
     out->ino=s->smb2_ino; out->birth=s->smb2_btime; out->birth_ns=s->smb2_btime_nsec;
@@ -83,6 +84,31 @@ static int await_reply(struct sr_connection *c,struct sr_reply *r) {
         }
     }
     return r->result;
+}
+static void volume_cb(struct smb2_context *smb,int status,void *data,void *opaque) {
+    struct sr_reply *r=opaque;
+    if (!status) {
+        struct smb2_query_info_reply *rep=data;
+        struct smb2_file_fs_volume_info *volume=rep->output_buffer;
+        if (volume) r->volume=volume->volume_serial_number;
+        else r->result=-EIO;
+        if (volume) smb2_free_data(smb,volume);
+    }
+    reply_cb(smb,status,data,opaque);
+}
+int sr_volume(struct sr_connection *c,uint32_t *serial) {
+    if (!c || !c->smb) return -ENOTCONN;
+    struct smb2fh *fh=smb2_open(c->smb,"",O_RDONLY|O_DIRECTORY);
+    if (!fh) return -EIO;
+    struct smb2_query_info_request req={0}; struct sr_reply r={0};
+    req.info_type=SMB2_0_INFO_FILESYSTEM; req.file_info_class=SMB2_FILE_FS_VOLUME_INFORMATION;
+    req.output_buffer_length=1024; memcpy(req.file_id,*smb2_get_file_id(fh),SMB2_FD_SIZE);
+    struct smb2_pdu *p=smb2_cmd_query_info_async(c->smb,&req,volume_cb,&r);
+    if (!p) { smb2_close(c->smb,fh); return -EIO; }
+    smb2_queue_pdu(c->smb,p); int rc=await_reply(c,&r);
+    if (c->smb) smb2_close(c->smb,fh);
+    if (!rc) *serial=r.volume;
+    return rc;
 }
 /* mode: 0 read, 1 exclusive create with rollback-on-close, 2 locked SHA undo.
  * No FILE_OPEN_IF, OVERWRITE, truncation, or path-based deletion is exposed. */

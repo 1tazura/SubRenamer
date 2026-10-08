@@ -10,7 +10,9 @@ internal static class SmbNative
     {
         public ulong Inode, Birth, BirthNanoseconds, Size;
         public uint Type, Attributes;
-        public readonly string Identity => $"{Inode:x}:{Birth:x}:{BirthNanoseconds:x}";
+        // Some Samba/filesystem combinations synthesize directory creation
+        // time from mutable atime/ctime. Directory identity must not use it.
+        public readonly string Identity => Type == 1 ? $"directory:{Inode:x}" : $"{Inode:x}:{Birth:x}:{BirthNanoseconds:x}";
         public readonly bool IsLink => Type == 2 || (Attributes & 0x400) != 0;
     }
     [DllImport(Library)] internal static extern IntPtr sr_new();
@@ -18,6 +20,7 @@ internal static class SmbNative
     [DllImport(Library)] internal static extern int sr_connect(IntPtr context,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string host, [MarshalAs(UnmanagedType.LPUTF8Str)] string share,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string user, [MarshalAs(UnmanagedType.LPUTF8Str)] string? password);
+    [DllImport(Library)] internal static extern int sr_volume(IntPtr context, out uint serial);
     [DllImport(Library)] internal static extern int sr_guid(IntPtr context, [Out] byte[] guid);
     [DllImport(Library)] internal static extern int sr_stat_path(IntPtr context, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, out Stat stat);
     [DllImport(Library)] internal static extern IntPtr sr_list(IntPtr context, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);

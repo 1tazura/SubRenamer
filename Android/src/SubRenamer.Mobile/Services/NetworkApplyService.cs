@@ -36,7 +36,6 @@ internal sealed class NetworkApplyService(ArchiveService archives)
                     // Compound FILE_CREATE + delete-pending, share_access=0: a
                     // preview race fails rather than overwriting/renaming a file.
                     destination = folder.CreateSubtitleExclusive(item.DestinationName);
-                    fileIdentity = destination.FileIdentity;
                     if (session is not null)
                         fingerprint = await session.CopyEntryToAsync(item.SourceKey, destination, token);
                     else
@@ -46,6 +45,10 @@ internal sealed class NetworkApplyService(ArchiveService archives)
                         fingerprint = await StreamCopyService.CopyWithSha256Async(input, destination, token);
                     }
                     token.ThrowIfCancellationRequested();
+                    destination.Flush();
+                    // Capture after writing: some servers synthesize file birth
+                    // timestamps from ctime. Never journal pre-transfer metadata.
+                    fileIdentity = destination.FileIdentity;
                     destination.Commit();
                     created.Add(new AppliedFileRecord(item.DestinationName, fingerprint.Sha256, fileIdentity));
                     bytes += fingerprint.Length;

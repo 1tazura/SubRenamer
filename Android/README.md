@@ -96,8 +96,9 @@ subdirectories), non-root native SMB2/3 access, server-exclusive subtitle
 creation and identity/SHA-verified restart Undo. Download remains the subtitle
 source and local Download/Torrent remains selectable. Real loopback SMB tests
 pass on the phone; actual NAS writing and APK/SAF acceptance remain pending.
-Anonymous listing of `192.168.1.128/Completed` works but anonymous directory
-creation is denied, so a writable NAS account is required.
+Anonymous listing of `192.168.1.128/Completed` works; after a NAS permission
+update, reserved isolated-directory creation also succeeds. NAS apply/Undo
+acceptance is in progress.
 See [`docs/NETWORK_STORAGE.md`](docs/NETWORK_STORAGE.md), including the separate
 network-test package that preserves the old installed app/signature/data.
 

@@ -61,11 +61,12 @@ public sealed class SmbConnection : IDisposable
                     connection.Location.Share, user, user.Length == 0 ? null : password ?? ""), "连接/认证");
                 var guid = new byte[16];
                 connection.Check(SmbNative.sr_guid(connection._context, guid), "服务器身份");
+                connection.Check(SmbNative.sr_volume(connection._context, out var volume), "共享卷身份");
                 var stat = connection.Stat(connection.Location.Directory);
-                if (stat.Type != 1 || stat.IsLink || (stat.Inode == 0 && stat.Birth == 0))
+                if (stat.Type != 1 || stat.IsLink || stat.Inode == 0)
                     throw new IOException("目标根不是具有可靠身份的普通目录。");
                 connection.RootIdentity = new StorageRootIdentity("smb", connection.Location.Url,
-                    Convert.ToHexString(guid), stat.Identity);
+                    Convert.ToHexString(guid) + ":" + volume.ToString("x"), stat.Identity);
                 if (expectedIdentity is not null && expectedIdentity != connection.RootIdentity)
                     throw new IOException("网络服务器/共享/目标根身份已变化；请明确重新选择，旧撤销记录不会迁移。");
                 connection.Root = new SmbStorageFolder(connection, connection.Location.Directory, stat);

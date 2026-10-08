@@ -11,11 +11,11 @@ recursively: no Torrent child is required.
 **This is a candidate, not completed NAS/device acceptance.** On this phone,
 managed production scan/Core preview/apply/restart-Undo code passed against a
 real, isolated loopback Samba server. This is stronger than mocks, but is not
-APK/SAF acceptance or successful writing to the actual NAS. The NAS allows
-anonymous listing, but an attempt to create a uniquely named isolated test
-directory returned `NT_STATUS_ACCESS_DENIED`. No directory/file was successfully
-created on the NAS. A writable account or explicit NAS permission change is
-required; choosing another protocol cannot bypass server permissions.
+APK/SAF acceptance or successful writing to the actual NAS. The NAS initially allowed
+anonymous listing but denied isolated directory creation. After the user's
+permission update, anonymous creation of the reserved isolated test directory
+and two zero-byte test videos succeeded. Actual production NAS apply/Undo
+acceptance is now in progress; ordinary media directories remain untouched.
 
 ## Device observations
 
@@ -62,10 +62,14 @@ URI-derived names). `SmbStorageFolder/File` provide network metadata and
 subtitle operations. The original Core matching algorithm is unchanged.
 
 Settings persist a credential-free `VideoRoot` identity: canonical backend/root
-URI, server GUID, selected directory inode and creation timestamp. Directory
+URI, server GUID, volume serial and selected directory inode. Directory
 URIs in plans/journals also include directory identity. Before network listing,
 creation or deletion the backend rechecks root and target directory identities;
-open operations recheck after acquiring a handle. Restoring a different
+open operations recheck after acquiring a handle. Directory creation timestamps
+are deliberately excluded: some Samba/filesystem combinations synthesize them
+from mutable metadata, which caused the first Linux CI run to reject ordinary
+directory changes. File identities are captured after transfer, not before it.
+Restoring a different
 server/share/root fails closed. Explicit reselection invalidates the previous
 one-level journal without clearing the unrelated Download archive index.
 
