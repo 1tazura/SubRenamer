@@ -17,10 +17,10 @@ These are invariants, not optional features:
 
 Read-only device probing confirmed that `Completed` on `192.168.1.128` is an
 anonymously listable SMB share. A real CIFS mount attempt failed; keep the APK
-no-root. Independent-root scanning and identity-scoped undo groundwork are in
-place, but the UI/network backend and exclusive SMB creation are still pending.
-Complete isolated-directory conflict/disconnect/restart/identity acceptance
-before writing into normal media directories. See [`NETWORK_STORAGE.md`](NETWORK_STORAGE.md).
+no-root. The v0.1.26 candidate now implements independent-root UI, SMB2/3 access,
+exclusive creation/rollback and same-handle SHA/file-identity Undo. On-phone
+loopback tests pass; anonymous NAS writes are denied. Obtain a writable account
+and complete APK/SAF plus isolated NAS acceptance before normal-media placement. See [`NETWORK_STORAGE.md`](NETWORK_STORAGE.md).
 
 ## P1 — make matching recoverable
 

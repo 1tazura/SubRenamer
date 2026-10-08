@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace SubRenamer.Mobile.Services;
 
-public sealed record UndoFileRecord(string DestinationName, string Sha256);
+public sealed record UndoFileRecord(string DestinationName, string Sha256, string? FileIdentity = null);
 
 public sealed record UndoBatchRecord(
     string TargetRelativePath,
@@ -18,7 +18,8 @@ public sealed record AppSettings(
     string ManualVideoPattern = "",
     string ManualSubtitlePattern = "",
     string VideoRegex = "",
-    string SubtitleRegex = "");
+    string SubtitleRegex = "",
+    StorageRootIdentity? VideoRoot = null);
 
 public sealed class SettingsStore
 {
@@ -99,6 +100,16 @@ public sealed class SettingsStore
         {
             DownloadBookmark = bookmark,
             LastUndoBatch = null,
+        }, cancellationToken);
+    }
+
+    public async Task SaveVideoRootAsync(StorageRootIdentity? root, CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        await SaveAsync(current with
+        {
+            VideoRoot = root,
+            LastUndoBatch = current.VideoRoot == root ? current.LastUndoBatch : null,
         }, cancellationToken);
     }
 

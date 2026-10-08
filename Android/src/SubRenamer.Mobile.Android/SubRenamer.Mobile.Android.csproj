@@ -4,8 +4,8 @@
     <TargetFramework>net10.0-android</TargetFramework>
     <SupportedOSPlatformVersion>23</SupportedOSPlatformVersion>
     <ApplicationId>io.github.subrenamer.mobile</ApplicationId>
-    <ApplicationVersion>26</ApplicationVersion>
-    <ApplicationDisplayVersion>0.1.25</ApplicationDisplayVersion>
+    <ApplicationVersion>27</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.26</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <AndroidUseLatestPlatformSdk>true</AndroidUseLatestPlatformSdk>
@@ -27,6 +27,18 @@
   <ItemGroup>
     <ProjectReference Include="..\SubRenamer.Mobile\SubRenamer.Mobile.csproj" />
   </ItemGroup>
+
+  <PropertyGroup Condition="'$(ApplicationId)' == 'io.github.subrenamer.mobile.networktest'">
+    <DefineConstants>$(DefineConstants);NETWORK_TEST</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <AndroidNativeLibrary Include="../../native/.build/android/*.so" Abi="arm64-v8a" />
+    <AndroidAsset Include="../../native/THIRD_PARTY_NOTICES.txt" />
+    <AndroidAsset Include="../../native/LICENCE-LGPL-2.1.txt" />
+  </ItemGroup>
+  <Target Name="RequireSmbNativeLibraries" BeforeTargets="Build">
+    <Error Condition="!Exists('../../native/.build/android/libsubrenamersmb.so')" Text="Build Android/native/build.sh for android before publishing." />
+  </Target>
 
   <!--
     .NET 10 Android currently has an incremental BuildArchive bug which can make

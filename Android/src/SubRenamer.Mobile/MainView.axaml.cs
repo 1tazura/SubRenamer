@@ -21,7 +21,7 @@ public partial class MainView : UserControl
 
     private readonly ObservableCollection<SourceCard> _cards = [];
     private IReadOnlyList<VideoTarget> _targets = [];
-    private Avalonia.Platform.Storage.IStorageFolder? _downloadRoot;
+    private IContentFolder? _downloadRoot;
     private MatchPlan? _currentPlan;
     private UndoBatchRecord? _undoBatch;
     private bool _suppressCandidateChanged;
@@ -59,7 +59,9 @@ public partial class MainView : UserControl
         try
         {
             StatusText.Text = "正在检查已保存的 Download 授权…";
-            ApplyLoadedMatchSettings(await _settings.LoadAsync());
+            var loadedSettings = await _settings.LoadAsync();
+            ApplyLoadedMatchSettings(loadedSettings);
+            await RestoreNetworkVideoRootAsync(loadedSettings);
             _downloadRoot = await _storage.RestoreDownloadAsync(this);
 
             if (_downloadRoot is null)
@@ -195,7 +197,8 @@ public partial class MainView : UserControl
     {
         var count = _undoBatch?.Files.Count ?? 0;
         UndoButton.Content = count > 0 ? $"撤销上次处理 ({count} 项)" : "撤销上次处理";
-        UndoButton.IsEnabled = !_busy && _downloadRoot is not null && count > 0;
+        UndoButton.IsEnabled = !_busy && _downloadRoot is not null && count > 0 &&
+                               (_undoBatch?.TargetRoot?.Backend != "smb" || _videoRoot is not null);
     }
 
     private async Task ScanAsync()
@@ -223,7 +226,11 @@ public partial class MainView : UserControl
             var result = await Task.Run(async () =>
             {
                 var videoWatch = Stopwatch.StartNew();
-                var targetsTask = _scanner.FindVideoTargetsAsync(root);
+                if (_savedVideoRoot is not null && _videoRoot is null)
+                    throw new IOException("网络视频根未连接。");
+                var targetsTask = _videoRoot is null
+                    ? _scanner.FindVideoTargetsAsync(root)
+                    : _scanner.FindVideoTargetsInRootAsync(_videoRoot);
                 var measuredTargetsTask = targetsTask.ContinueWith(task =>
                 {
                     videoWatch.Stop();
@@ -293,7 +300,7 @@ public partial class MainView : UserControl
         if (card.SelectedCandidate is null)
         {
             _currentPlan = null;
-            PreviewText.Text = "无法可靠自动归属。请从上方列表点选正确的 Torrent 目录。" +
+            PreviewText.Text = "无法可靠自动归属。请从上方列表点选正确的视频目录。" +
                                (string.IsNullOrWhiteSpace(_lastScanPerformanceText)
                                    ? ""
                                    : Environment.NewLine + Environment.NewLine + _lastScanPerformanceText);
@@ -453,7 +460,7 @@ public partial class MainView : UserControl
                         plan.Target.RelativePath,
                         DateTimeOffset.UtcNow,
                         result.CreatedFiles
-                            .Select(x => new UndoFileRecord(x.DestinationName, x.Sha256))
+                            .Select(x => new UndoFileRecord(x.DestinationName, x.Sha256, x.FileIdentity))
                             .ToArray(),
                         plan.Target.RootIdentity,
                         plan.Target.Folder.Path.AbsoluteUri);
@@ -503,7 +510,7 @@ public partial class MainView : UserControl
         try
         {
             StatusText.Text = $"撤销上次处理：检查并删除 {batch.Files.Count} 个由本应用创建的字幕…";
-            result = await Task.Run(() => _undo.UndoLastAsync(root, batch));
+            result = await Task.Run(() => _undo.UndoLastAsync(root, batch, videoRoot: _videoRoot));
 
             await RefreshUndoBatchAsync();
             rebuildPreview = result.Deleted > 0 &&
@@ -577,13 +584,15 @@ public partial class MainView : UserControl
         SetBusy(true);
         try
         {
-            _downloadRoot = await _storage.PickDownloadAsync(this);
-            if (_downloadRoot is null)
+            var picked = await _storage.PickDownloadAsync(this);
+            if (picked is null)
             {
                 StatusText.Text = "未更改 Download 授权。";
                 return;
             }
 
+            _downloadRoot = picked;
+            InvalidateStoragePlan();
             _undoBatch = null;
             _lastScanPerformanceText = "";
             RootText.Text = "已授权：Download";
@@ -605,7 +614,14 @@ public partial class MainView : UserControl
         _busy = busy;
         RestoreRootButton.IsEnabled = !busy;
         ChangeRootButton.IsEnabled = !busy;
-        ScanButton.IsEnabled = !busy && _downloadRoot is not null;
+        ScanButton.IsEnabled = !busy && _downloadRoot is not null && (_savedVideoRoot is null || _videoRoot is not null);
+        NetworkRootButton.IsEnabled = !busy;
+        ConnectNetworkButton.IsEnabled = !busy;
+        LocalVideoButton.IsEnabled = !busy;
+        NetworkUrlTextBox.IsEnabled = !busy;
+        NetworkUserTextBox.IsEnabled = !busy;
+        NetworkPasswordTextBox.IsEnabled = !busy;
+        NetworkDirectoryCombo.IsEnabled = !busy;
         PreviewButton.IsEnabled = !busy;
         CandidateCombo.IsEnabled = !busy;
         SourceList.IsEnabled = !busy;

@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Avalonia.Platform.Storage;
+using IStorageFolder = SubRenamer.Mobile.Services.IContentFolder;
 
 namespace SubRenamer.Mobile.Services;
 
@@ -33,7 +33,7 @@ public sealed class UndoService(SettingsStore settingsStore)
         // video root reinterpret them. Explicit journals must match the restored
         // backend/root before enumeration, even with a same-session live handle.
         var root = batch.TargetRoot is null ? downloadRoot : videoRoot ?? downloadRoot;
-        if (batch.TargetRoot is not null && !batch.TargetRoot.MatchesSaf(root.Path))
+        if (batch.TargetRoot is not null && batch.TargetRoot != StorageAccessService.GetRootIdentity(root))
             throw new InvalidOperationException("撤销存储后端或根目录身份不匹配；未删除任何文件。");
 
         IStorageFolder? target = null;
@@ -99,6 +99,15 @@ public sealed class UndoService(SettingsStore settingsStore)
                 try
                 {
                     CopyFingerprint fingerprint;
+                    if (file is SmbStorageFile networkFile)
+                    {
+                        var watch = Stopwatch.StartNew();
+                        var verified = await networkFile.DeleteIfUnchangedAsync(record.Sha256, record.FileIdentity, cancellationToken);
+                        watch.Stop();
+                        return verified.Deleted
+                            ? UndoFileResult.Deleted(record.DestinationName, TimeSpan.Zero, watch.Elapsed, TimeSpan.Zero, verified.Fingerprint.Length)
+                            : UndoFileResult.Changed(record.DestinationName, TimeSpan.Zero, watch.Elapsed, verified.Fingerprint.Length);
+                    }
 
                     // Close the read stream immediately after hashing, before
                     // DeleteAsync. This keeps the verify->delete race window no

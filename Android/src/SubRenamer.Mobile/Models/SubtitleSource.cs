@@ -1,4 +1,4 @@
-using Avalonia.Platform.Storage;
+using IStorageFile = SubRenamer.Mobile.Services.IContentFile;
 
 namespace SubRenamer.Mobile.Models;
 

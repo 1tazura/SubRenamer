@@ -7,3 +7,4 @@ obj/
 artifacts/
 vendor/SubRenamer/
 .DS_Store
+native/.build/

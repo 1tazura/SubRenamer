@@ -29,9 +29,13 @@ public partial class MainView
 
         try
         {
-            StatusText.Text = "单次枚举 Download 后，并行扫描 Torrent 子树与字幕来源…";
+            StatusText.Text = "单次枚举 Download 后，并行扫描视频根目录与字幕来源…";
             var totalWatch = Stopwatch.StartNew();
-            var result = await _scanner.ScanAllWithMetricsAsync(root);
+            if (_savedVideoRoot is not null && _videoRoot is null)
+                throw new IOException("网络视频根未恢复，请先连接网络目录；不会改用本地路径。");
+            var result = _videoRoot is null
+                ? await _scanner.ScanAllWithMetricsAsync(root)
+                : await _scanner.ScanAllWithMetricsAsync(root, _videoRoot);
 
             _targets = result.Targets;
 
@@ -52,7 +56,7 @@ public partial class MainView
 
             _lastScanPerformanceText =
                 $"扫描性能：Download 根枚举 {result.SubtitleScan.RootEnumerationElapsed.TotalMilliseconds:F0} ms；" +
-                $"Torrent 子树遍历 {result.VideoTraversalElapsed.TotalMilliseconds:F0} ms；" +
+                $"视频根遍历 {result.VideoTraversalElapsed.TotalMilliseconds:F0} ms；" +
                 $"压缩包索引 {result.SubtitleScan.ArchiveIndexElapsed.TotalMilliseconds:F0} ms " +
                 $"({result.SubtitleScan.ArchiveCount} 包)；" +
                 $"来源整理 {result.SubtitleScan.FinalizeElapsed.TotalMilliseconds:F0} ms；" +
@@ -109,7 +113,7 @@ public partial class MainView
                         plan.Target.RelativePath,
                         DateTimeOffset.UtcNow,
                         result.CreatedFiles
-                            .Select(x => new UndoFileRecord(x.DestinationName, x.Sha256))
+                            .Select(x => new UndoFileRecord(x.DestinationName, x.Sha256, x.FileIdentity))
                             .ToArray(),
                         plan.Target.RootIdentity,
                         plan.Target.Folder.Path.AbsoluteUri);
@@ -188,7 +192,8 @@ public partial class MainView
             result = await Task.Run(() => _undo.UndoLastAsync(
                 root,
                 batch,
-                resolvedTarget: resolvedTarget));
+                resolvedTarget: resolvedTarget,
+                videoRoot: _videoRoot));
 
             await RefreshUndoBatchAsync();
             rebuildPreview = result.Deleted > 0 &&

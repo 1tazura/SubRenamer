@@ -1,4 +1,4 @@
-using Avalonia.Platform.Storage;
+using IStorageFile = SubRenamer.Mobile.Services.IContentFile;
 using SharpCompress.Archives;
 using SubRenamer.Mobile.Models;
 

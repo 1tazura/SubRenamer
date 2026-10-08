@@ -1,10 +1,11 @@
 using System.Diagnostics;
-using Avalonia.Platform.Storage;
+using IStorageFile = SubRenamer.Mobile.Services.IContentFile;
+using IStorageFolder = SubRenamer.Mobile.Services.IContentFolder;
 using SubRenamer.Mobile.Models;
 
 namespace SubRenamer.Mobile.Services;
 
-public sealed record AppliedFileRecord(string DestinationName, string Sha256);
+public sealed record AppliedFileRecord(string DestinationName, string Sha256, string? FileIdentity = null);
 
 public sealed record ApplyResult(
     int Applied,
@@ -26,6 +27,9 @@ public sealed class ApplyService(ArchiveService archiveService)
         MatchPlan plan,
         CancellationToken cancellationToken = default)
     {
+        if (plan.Target.Folder is SmbStorageFolder networkFolder)
+            return await new NetworkApplyService(archiveService).ApplyAsync(plan, networkFolder, cancellationToken);
+
         // IStorageFolder.CreateFileAsync does not promise server-side exclusive
         // creation. Do not enable a network adapter through the SAF write path.
         if (plan.Target.RootIdentity is { Backend: not StorageRootIdentity.SafBackend })

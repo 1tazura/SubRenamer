@@ -104,14 +104,21 @@ CI cannot fully simulate every Android `DocumentsProvider`, so code review and r
 - weak work attribution requires user choice;
 - undo only deletes unchanged app-created outputs.
 
-## Termux device validation of network-storage groundwork
+## Network candidate validation
 
-The phone ran the original 52 tests and all 38 Android managed-layer tests
-(including 11 independent-root/undo-identity tests). It also published and ran
-the reflection-disabled trimmed persistence smoke for `linux-bionic-arm64`,
-including explicit backend/root/folder identity restoration and legacy defaults.
-These are not tests of a new APK or SMB writes. No new APK has been built or
-installed; isolated network apply/undo acceptance remains pending.
+The phone ran the original 52 tests and all 50 Android managed-layer tests,
+including seven opt-in tests against an actual isolated loopback Samba share.
+These exercise production scan/Core preview/apply/restart Undo, same-name/case
+conflicts, disconnect/rollback, modified output retention and identity changes.
+CI now builds the host native client and runs the same tests (without a fixture
+the network tests are explicitly skipped). Trimmed persistence smoke additionally
+checks network root/server/file identities via production generated JSON stores;
+the published reflection-disabled linux-bionic-arm64 binary passed on-phone.
+
+This is not APK/SAF or actual NAS acceptance. The NAS anonymously lists files
+but denies creation of the isolated test directory. CI builds Android native
+libraries, verifies their APK payloads, and produces a separate `networktest`
+package so the old app's incompatible signing certificate/data remain intact.
 See [`NETWORK_STORAGE.md`](NETWORK_STORAGE.md) for environment/probe/signature
 observations and preservation details.
 

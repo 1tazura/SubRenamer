@@ -32,6 +32,7 @@ Legend:
 | Open arbitrary files/folders | ✅ | ❌ | Android currently uses a specialized `Download` workflow. |
 | Drag and drop | ✅ | ➖ | Desktop interaction; not useful as a primary Android flow. |
 | Torrent-safe recursive target discovery | ❌ | ✅ | Fork-specific Android feature. |
+| Independent network video root / SMB2/3 | not a direct equivalent | 🟡 | v0.1.26 candidate implements share/subdirectory selection, exclusive outputs and identity-scoped Undo; loopback tests pass, actual NAS/APK acceptance pending. |
 | Subtitle source discovery from `Download` root | ❌ | ✅ | Fork-specific Android feature. |
 | Source → torrent work attribution | ❌ | ✅ | Fork-specific layer above episode mapping; ambiguous results require user selection. |
 | ZIP / 7z / RAR source archives | not the same workflow | ✅ | Android reads archive entries and extracts only selected subtitles. |

@@ -17,8 +17,11 @@ On Android ExternalStorageProvider, Avalonia's item enumeration already returns 
 The current UI asks `ScanService` to recursively discover directories below
 `Download/Torrent`. Its independent-root overload scans an explicitly supplied
 video root directly (including that root), while subtitles still come from
-Download. This API is groundwork; no SMB picker/backend is connected yet.
-Targets retain the authorized root identity alongside their relative path.
+Download. v0.1.26 connects this path to an independent SMB root/subdirectory
+selector. Targets retain authorized root and physical directory identities.
+An app-owned `IContentItem/File/Folder` boundary delegates SAF to Avalonia
+handles and network operations to the narrow SMB client; Avalonia 12 storage
+interfaces are not user-implementable.
 
 A `VideoTarget` is exactly a physical folder that directly contains one or more supported video files. The hierarchy is not flattened into one global video list.
 
@@ -152,11 +155,13 @@ The current matching-mode UI is intentionally compact. It exposes Core functiona
 
 ## Network boundary
 
-The local SAF workflow is unchanged. Non-SAF target identities fail closed in
-Apply until a backend with verified server-side exclusive create is available.
-Do not adapt SMB by forwarding ordinary `CreateFileAsync`/`OpenWriteAsync`
-without atomic no-overwrite semantics and owned-handle failure cleanup.
-Actual NAS/CIFS observations and pending acceptance are in
+Local SAF uses the existing pipeline. SMB Apply uses FILE_CREATE with exclusive
+sharing and compound delete-pending setup, sequential subtitle transfer/SHA,
+flush/commit/close, and owned-handle rollback. SMB Undo hashes/verifies file
+identity and marks deletion on the same exclusively opened handle. Server GUID,
+root and target directory identities are rechecked; credentials are never
+persisted. Unknown backends still fail closed. Native libraries are dynamically
+linked and require no root. Actual NAS/CIFS observations and pending acceptance are in
 [`NETWORK_STORAGE.md`](NETWORK_STORAGE.md).
 
 ## 10. Hard safety invariants

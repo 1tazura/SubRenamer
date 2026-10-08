@@ -1,11 +1,17 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
+using IStorageItem = SubRenamer.Mobile.Services.IContentItem;
+using IStorageFile = SubRenamer.Mobile.Services.IContentFile;
+using IStorageFolder = SubRenamer.Mobile.Services.IContentFolder;
 
 namespace SubRenamer.Mobile.Services;
 
 public sealed class StorageAccessService(SettingsStore settingsStore)
 {
+    public static StorageRootIdentity GetRootIdentity(IStorageFolder root)
+        => root is IIdentifiedStorageFolder identified ? identified.RootIdentity : StorageRootIdentity.ForSaf(root.Path);
+
     private const string ExternalStorageDocumentsAuthority = "com.android.externalstorage.documents";
 
     public async Task<IStorageFolder?> RestoreDownloadAsync(
@@ -22,7 +28,8 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
 
         try
         {
-            return await provider.OpenFolderBookmarkAsync(settings.DownloadBookmark);
+            var restored = await provider.OpenFolderBookmarkAsync(settings.DownloadBookmark);
+            return restored is null ? null : new SafContentFolder(restored);
         }
         catch
         {
@@ -58,7 +65,7 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
                 await settingsStore.SaveDownloadBookmarkAsync(bookmark, cancellationToken);
         }
 
-        return folder;
+        return new SafContentFolder(folder);
     }
 
     /// <summary>

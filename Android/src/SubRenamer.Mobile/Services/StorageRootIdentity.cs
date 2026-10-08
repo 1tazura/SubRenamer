@@ -5,7 +5,8 @@ namespace SubRenamer.Mobile.Services;
 /// backends must fail closed; a network-relative path is never a Download path.
 /// SMB support must additionally pin the server/share identity before writing.
 /// </summary>
-public sealed record StorageRootIdentity(string Backend, string RootUri)
+public sealed record StorageRootIdentity(string Backend, string RootUri,
+    string? ServerIdentity = null, string? RootFileIdentity = null)
 {
     public const string SafBackend = "saf";
 

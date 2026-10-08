@@ -1,5 +1,7 @@
 using System.Diagnostics;
-using Avalonia.Platform.Storage;
+using IStorageItem = SubRenamer.Mobile.Services.IContentItem;
+using IStorageFile = SubRenamer.Mobile.Services.IContentFile;
+using IStorageFolder = SubRenamer.Mobile.Services.IContentFolder;
 using SubRenamer.Mobile.Models;
 
 namespace SubRenamer.Mobile.Services;
@@ -127,7 +129,7 @@ public sealed class ScanService(ArchiveService archiveService)
             var targets = await FindVideoTargetsFromRootCoreAsync(
                 videoRoot ?? root.TorrentRoot,
                 videoRoot is null ? "Torrent" : "",
-                StorageRootIdentity.ForSaf((videoRoot ?? downloadRoot).Path),
+                StorageAccessService.GetRootIdentity(videoRoot ?? downloadRoot),
                 cancellationToken);
             watch.Stop();
             return (Targets: targets, Elapsed: watch.Elapsed);
@@ -162,7 +164,7 @@ public sealed class ScanService(ArchiveService archiveService)
     {
         var root = await SnapshotDownloadRootAsync(downloadRoot, cancellationToken);
         return await FindVideoTargetsFromRootCoreAsync(
-            root.TorrentRoot, "Torrent", StorageRootIdentity.ForSaf(downloadRoot.Path), cancellationToken);
+            root.TorrentRoot, "Torrent", StorageAccessService.GetRootIdentity(downloadRoot), cancellationToken);
     }
 
     public Task<IReadOnlyList<VideoTarget>> FindVideoTargetsInRootAsync(
@@ -170,7 +172,7 @@ public sealed class ScanService(ArchiveService archiveService)
         CancellationToken cancellationToken = default)
         => Task.Run(
             () => FindVideoTargetsFromRootCoreAsync(
-                videoRoot, "", StorageRootIdentity.ForSaf(videoRoot.Path), cancellationToken),
+                videoRoot, "", StorageAccessService.GetRootIdentity(videoRoot), cancellationToken),
             cancellationToken);
 
     private async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsFromRootCoreAsync(
@@ -209,8 +211,10 @@ public sealed class ScanService(ArchiveService archiveService)
                         rootIdentity));
                 }
 
-                if (snapshot.Work.Depth >= 8)
+                if (snapshot.Work.Depth >= 8 && rootIdentity.Backend != "smb")
                     continue;
+                if (rootIdentity.Backend == "smb" && snapshot.Work.Depth >= 128 && snapshot.Children.Count > 0)
+                    throw new IOException("网络目录层级超过安全扫描上限；未生成不完整处理计划。");
 
                 foreach (var child in snapshot.Children)
                 {

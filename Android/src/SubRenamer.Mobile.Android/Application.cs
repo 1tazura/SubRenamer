@@ -4,6 +4,8 @@ using Avalonia;
 using Avalonia.Android;
 using SubRenamer.Mobile;
 
+[assembly: UsesPermission(global::Android.Manifest.Permission.Internet)]
+
 namespace SubRenamer.Mobile.Android;
 
 [Application]

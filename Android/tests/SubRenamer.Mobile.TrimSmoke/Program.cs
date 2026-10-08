@@ -63,14 +63,17 @@ try
     Check(saved.LastUndoBatch!.TargetRoot is null && saved.LastUndoBatch.TargetFolderUri is null,
         "legacy undo remains Download-relative");
 
-    var explicitRoot = new StorageRootIdentity("smb", "smb://192.168.1.128/Completed/作品");
+    var explicitRoot = new StorageRootIdentity("smb", "smb://192.168.1.128/Completed/作品", "server-guid", "root-inode:birth");
+    await restarted.SaveVideoRootAsync(explicitRoot);
     await restarted.SaveUndoBatchAsync(old.LastUndoBatch with
     {
         TargetRoot = explicitRoot,
         TargetFolderUri = "smb://192.168.1.128/Completed/作品/Season1",
+        Files = [new UndoFileRecord("episode01.ass", "ABC123", "file-inode:birth")],
     });
     var explicitSaved = await new SettingsStore(settingsPath, cache).LoadAsync();
-    Check(explicitSaved.LastUndoBatch?.TargetRoot == explicitRoot &&
+    Check(explicitSaved.VideoRoot == explicitRoot && explicitSaved.LastUndoBatch?.TargetRoot == explicitRoot &&
+          explicitSaved.LastUndoBatch.Files.Single().FileIdentity == "file-inode:birth" &&
           explicitSaved.LastUndoBatch.TargetFolderUri == "smb://192.168.1.128/Completed/作品/Season1",
         "explicit backend/root/folder identity after restart");
 

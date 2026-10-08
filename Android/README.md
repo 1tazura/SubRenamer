@@ -91,12 +91,15 @@ The Android UI is still intentionally small. It does **not** yet expose the full
 
 ## Network storage status
 
-The current UI still uses local SAF Download/Torrent; it cannot yet place
-subtitles over SMB. A real-device read-only probe confirmed anonymous listing
-of `192.168.1.128/Completed`, and the first safety increment adds independent
-video-root scan APIs plus explicit persisted undo root/folder identities.
-See [`docs/NETWORK_STORAGE.md`](docs/NETWORK_STORAGE.md) for measured results,
-validation limits, and the remaining exclusive-create SMB implementation.
+The v0.1.26 candidate adds an independent SMB video root (including shared
+subdirectories), non-root native SMB2/3 access, server-exclusive subtitle
+creation and identity/SHA-verified restart Undo. Download remains the subtitle
+source and local Download/Torrent remains selectable. Real loopback SMB tests
+pass on the phone; actual NAS writing and APK/SAF acceptance remain pending.
+Anonymous listing of `192.168.1.128/Completed` works but anonymous directory
+creation is denied, so a writable NAS account is required.
+See [`docs/NETWORK_STORAGE.md`](docs/NETWORK_STORAGE.md), including the separate
+network-test package that preserves the old installed app/signature/data.
 
 ## Important missing features
 
@@ -120,6 +123,9 @@ Requirements:
 
 ```bash
 dotnet workload install android
+
+# Requires CMake, Ninja, Android NDK; CI builds these native libraries.
+ANDROID_NDK_HOME=/path/to/ndk bash Android/native/build.sh Android/native/.build/android android
 
 dotnet test SubRenamer.Tests/SubRenamer.Tests.csproj -c Release
 

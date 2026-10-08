@@ -1,5 +1,7 @@
 using System.Reflection;
-using Avalonia.Platform.Storage;
+using IStorageItem = SubRenamer.Mobile.Services.IContentItem;
+using IStorageFile = SubRenamer.Mobile.Services.IContentFile;
+using IStorageFolder = SubRenamer.Mobile.Services.IContentFolder;
 using NUnit.Framework;
 using SubRenamer.Mobile.Services;
 
