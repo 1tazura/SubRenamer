@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <AvaloniaVersion>12.1.1</AvaloniaVersion>
+    <SharpCompressVersion>0.50.4</SharpCompressVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+</Project>

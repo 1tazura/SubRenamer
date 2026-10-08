@@ -1,0 +1,14 @@
+SubRenamer network backend uses libsmb2 as a separately linked shared library.
+Upstream: https://github.com/sahlberg/libsmb2
+Pinned source: fc710a3ebd58a3c15d0ef24322f748e38a3d3a90
+License: GNU Lesser General Public License, version 2.1 or later.
+Copyright: Ronnie Sahlberg and upstream contributors (see individual source files).
+
+The complete LGPL-2.1 text accompanies this notice. GitHub APK artifacts also
+include libsmb2-source.tar.gz (corresponding unmodified upstream source).
+Build commands and SubRenamer's wrapper source are in Android/native in the
+SubRenamer repository. Both shared libraries can be rebuilt and replaced by
+repackaging/re-signing the APK; no library integrity restriction is added.
+
+SubRenamer's wrapper/application code remains under the repository license.
+No NAS password is part of these binaries, sources, or configuration files.

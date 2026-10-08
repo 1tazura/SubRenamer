@@ -1,0 +1,151 @@
+using System.Text.Json;
+
+namespace SubRenamer.Mobile.Services;
+
+public sealed record UndoFileRecord(string DestinationName, string Sha256, string? FileIdentity = null);
+
+public sealed record UndoBatchRecord(
+    string TargetRelativePath,
+    DateTimeOffset CreatedAtUtc,
+    IReadOnlyList<UndoFileRecord> Files,
+    StorageRootIdentity? TargetRoot = null,
+    string? TargetFolderUri = null);
+
+public sealed record AppSettings(
+    string? DownloadBookmark = null,
+    UndoBatchRecord? LastUndoBatch = null,
+    CoreMatchMode MatchMode = CoreMatchMode.Diff,
+    string ManualVideoPattern = "",
+    string ManualSubtitlePattern = "",
+    string VideoRegex = "",
+    string SubtitleRegex = "",
+    StorageRootIdentity? VideoRoot = null);
+
+public sealed class SettingsStore
+{
+    private readonly string _path;
+    private readonly ArchiveIndexCacheStore _archiveCache;
+
+    public SettingsStore(string? path = null, ArchiveIndexCacheStore? archiveCache = null)
+    {
+        _archiveCache = archiveCache ?? new ArchiveIndexCacheStore();
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            _path = path;
+            return;
+        }
+
+        // Do not touch the filesystem while MainView is being constructed.
+        // On Android, storage-backed special folders may not be ready until the
+        // application/activity is fully initialized.
+        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(baseDir))
+            baseDir = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+        if (string.IsNullOrWhiteSpace(baseDir))
+            baseDir = Path.GetTempPath();
+
+        _path = Path.Combine(baseDir, "SubRenamerMobile", "settings.json");
+    }
+
+    public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(_path))
+            return new AppSettings();
+
+        try
+        {
+            await using var stream = File.OpenRead(_path);
+            return await JsonSerializer.DeserializeAsync(
+                       stream, SettingsJsonContext.Default.AppSettings, cancellationToken)
+                   ?? new AppSettings();
+        }
+        catch
+        {
+            return new AppSettings();
+        }
+    }
+
+    public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        var dir = Path.GetDirectoryName(_path);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        await using var stream = File.Create(_path);
+        await JsonSerializer.SerializeAsync(
+            stream,
+            settings,
+            SettingsJsonContext.Default.AppSettings,
+            cancellationToken);
+    }
+
+    public async Task SaveDownloadBookmarkAsync(
+        string bookmark,
+        CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        var changed = !string.Equals(current.DownloadBookmark, bookmark, StringComparison.Ordinal);
+
+        // Archive identities are SAF/provider-specific. A newly selected Download
+        // root must not inherit an index snapshot produced under an older root.
+        // Clearing is deliberately best-effort because the cache is only an
+        // optimization; the next scan will eagerly rebuild it.
+        if (changed)
+            await _archiveCache.ClearAsync(cancellationToken);
+
+        // A newly selected SAF root may point at a different Download tree.
+        // Never carry an undo journal across roots.
+        await SaveAsync(current with
+        {
+            DownloadBookmark = bookmark,
+            LastUndoBatch = null,
+        }, cancellationToken);
+    }
+
+    public async Task SaveVideoRootAsync(StorageRootIdentity? root, CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        await SaveAsync(current with
+        {
+            VideoRoot = root,
+            LastUndoBatch = current.VideoRoot == root ? current.LastUndoBatch : null,
+        }, cancellationToken);
+    }
+
+    public async Task SaveUndoBatchAsync(
+        UndoBatchRecord batch,
+        CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        await SaveAsync(current with { LastUndoBatch = batch }, cancellationToken);
+    }
+
+    public async Task ClearUndoBatchAsync(CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        if (current.LastUndoBatch is null)
+            return;
+
+        await SaveAsync(current with { LastUndoBatch = null }, cancellationToken);
+    }
+
+    public async Task SaveMatchSettingsAsync(
+        CoreMatchMode mode,
+        string manualVideoPattern,
+        string manualSubtitlePattern,
+        string videoRegex,
+        string subtitleRegex,
+        CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAsync(cancellationToken);
+        await SaveAsync(current with
+        {
+            MatchMode = mode,
+            ManualVideoPattern = manualVideoPattern,
+            ManualSubtitlePattern = manualSubtitlePattern,
+            VideoRegex = videoRegex,
+            SubtitleRegex = subtitleRegex,
+        }, cancellationToken);
+    }
+}

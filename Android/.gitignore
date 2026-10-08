@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+artifacts/
+vendor/SubRenamer/
+.DS_Store
+native/.build/
