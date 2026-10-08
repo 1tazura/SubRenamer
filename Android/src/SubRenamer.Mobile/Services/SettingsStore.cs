@@ -53,7 +53,8 @@ public sealed class SettingsStore
         try
         {
             await using var stream = File.OpenRead(_path);
-            return await JsonSerializer.DeserializeAsync<AppSettings>(stream, cancellationToken: cancellationToken)
+            return await JsonSerializer.DeserializeAsync(
+                       stream, SettingsJsonContext.Default.AppSettings, cancellationToken)
                    ?? new AppSettings();
         }
         catch
@@ -72,7 +73,7 @@ public sealed class SettingsStore
         await JsonSerializer.SerializeAsync(
             stream,
             settings,
-            new JsonSerializerOptions { WriteIndented = true },
+            SettingsJsonContext.Default.AppSettings,
             cancellationToken);
     }
 

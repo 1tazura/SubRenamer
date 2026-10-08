@@ -54,9 +54,10 @@ public sealed class ArchiveIndexCacheStore
         try
         {
             await using var stream = File.OpenRead(_path);
-            var records = await JsonSerializer.DeserializeAsync<ArchiveIndexCacheRecord[]>(
+            var records = await JsonSerializer.DeserializeAsync(
                               stream,
-                              cancellationToken: cancellationToken)
+                              ArchiveCacheJsonContext.Default.ArchiveIndexCacheRecordArray,
+                              cancellationToken)
                           ?? [];
 
             var output = new Dictionary<string, ArchiveIndexCacheRecord>(StringComparer.Ordinal);
@@ -100,7 +101,7 @@ public sealed class ArchiveIndexCacheStore
                 await JsonSerializer.SerializeAsync(
                     stream,
                     snapshot,
-                    new JsonSerializerOptions { WriteIndented = false },
+                    ArchiveCacheJsonContext.Default.ArchiveIndexCacheRecordArray,
                     cancellationToken);
             }
 

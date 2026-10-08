@@ -171,6 +171,12 @@ See `PROCESSING_PERFORMANCE.md`.
 
 The fixed `Download` / `Torrent` storage boundary remains useful. Do not shift routine folder-selection work back to the user solely for scan speed.
 
+## APK size pass — build complete, device acceptance pending
+
+The arm64-only v0.1.24 CI probe produced Debug, untrimmed Release and trimmed Release packages. Trimmed Release was 15,510,313 bytes versus 40,363,640 bytes for Debug. v0.1.25 replaces reflection-based JSON persistence with generated metadata and adds a published, reflection-disabled persistence smoke test to protect settings, undo journals and archive indexes.
+
+Before promoting trimmed Release as the default package, run the complete device workflow including restart/bookmark recovery, source archive scanning, matching, apply and SHA-256 undo. See `VALIDATION.md`. Per-item correction/exclusion remains the next feature priority.
+
 ## P4 — operation history
 
 Current Android undo stores one batch.

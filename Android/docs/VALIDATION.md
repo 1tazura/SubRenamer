@@ -30,28 +30,44 @@ The Android workflow validates these layers in order:
 
    This is only the sideload/testing signing channel. A future public release must use a separately managed private release keystore/secret, not this cached debug identity.
 
-4. **Standalone Android APK build**
+4. **Trimmed persistence smoke test**
+
+   CI publishes and runs a self-contained Linux executable with `PublishTrimmed=true`, `TrimMode=partial` and reflection-based JSON disabled. It uses the production settings/cache stores to verify:
+
+   - loading older settings JSON, including numeric matching modes and a persisted undo journal;
+   - retaining optional-property defaults from bookmark-only settings;
+   - saving rules and reopening the stores without losing the bookmark, output names or SHA-256 records;
+   - loading older archive indexes and retaining positive, negative and stable-rejection records across restart;
+   - invalidating undo and cache when the authorized root changes.
+
+   Both stores use generated `JsonSerializerContext` metadata. The JSON schema remains compatible with older installations. The smoke test treats `IL2026`/`IL3050` as errors; the Android trimmed candidate also treats `IL2026` as an error.
+
+   This verifies managed persistence after trimming. It does not substitute for Android-device startup, SAF or archive-extraction tests.
+
+5. **Standalone Android APK build**
 
    ```bash
-   dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
-     -c Debug -f net10.0-android -t:SignAndroidPackage \
+   dotnet publish Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+     -c Debug -f net10.0-android -r android-arm64 \
      -p:EmbedAssembliesIntoApk=true \
      -p:AndroidKeyStore=true \
      -p:AndroidSigningKeyStore=<stable-debug-keystore> \
      ...
    ```
 
-5. **APK payload inspection**
+6. **APK payload inspection**
 
-   CI lists the signed APK contents and requires the packaged arm64 payload to contain the app assembly, mobile layer and original Core assembly.
+   CI lists every produced APK's contents, requires the arm64 native payload and rejects an unexpected x86_64 payload. Publishing explicitly embeds managed assemblies for standalone sideloading.
 
    This check exists because an earlier debug build could compile successfully yet behave like an IDE Fast Deployment package: managed assemblies were not embedded, so a sideloaded APK exited before Avalonia/managed application code could start.
 
    The artifact also contains a text dump of the debug-signing certificate so signing identity changes are diagnosable.
 
-6. **Artifact upload**
+7. **Artifact upload**
 
-   CI publishes the debug-signed APK together with an APK content listing and debug signing-certificate information.
+   CI publishes the arm64 Debug APK plus untrimmed/trimmed Release candidates when their probe builds succeed. All use the same debug-only signing identity. Content listings, size comparisons and signing-certificate information accompany the APKs. Release probes remain optional; a green workflow alone does not prove a Release candidate was produced.
+
+   The last v0.1.24 probe produced all three candidates: Debug 40,363,640 bytes, untrimmed Release 35,273,513 bytes, trimmed Release 15,510,313 bytes (61.6% below Debug). These are build measurements, not a real-device acceptance of the trimmed package. Keep the stable Debug channel available until a candidate passes the device workflow below.
 
 ## Real-device milestones already reached
 

@@ -88,6 +88,15 @@ jobs:
           path: Android/mobile-test.log
           if-no-files-found: warn
 
+      - name: Validate trimmed persistence without JSON reflection
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish Android/tests/SubRenamer.Mobile.TrimSmoke/SubRenamer.Mobile.TrimSmoke.csproj \
+            -c Release -r linux-x64 --self-contained true \
+            -o "$RUNNER_TEMP/subrenamer-trim-smoke" --verbosity minimal
+          "$RUNNER_TEMP/subrenamer-trim-smoke/SubRenamer.Mobile.TrimSmoke"
+
       - name: Clean Android publish intermediates
         shell: bash
         run: |
@@ -164,6 +173,7 @@ jobs:
             -p:EmbedAssembliesIntoApk=true \
             -p:PublishTrimmed=true \
             -p:TrimMode=partial \
+            -p:WarningsAsErrors=IL2026 \
             -p:RunAOTCompilation=false \
             -p:AndroidEnableProfiledAot=false \
             -p:UseAppHost=false \
@@ -225,6 +235,7 @@ jobs:
           fi
 
           cat artifacts/apk-size-report.txt
+          cat artifacts/apk-size-report.txt >> "$GITHUB_STEP_SUMMARY"
 
           keytool -list -v \
             -keystore .ci-signing/subrenamer-debug.keystore \

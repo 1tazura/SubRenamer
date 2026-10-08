@@ -116,12 +116,12 @@ dotnet test SubRenamer.Tests/SubRenamer.Tests.csproj -c Release
 
 dotnet test Android/tests/SubRenamer.Mobile.Tests/SubRenamer.Mobile.Tests.csproj -c Release
 
-dotnet build Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
-  -c Debug -f net10.0-android -t:SignAndroidPackage \
+dotnet publish Android/src/SubRenamer.Mobile.Android/SubRenamer.Mobile.Android.csproj \
+  -c Debug -f net10.0-android -r android-arm64 \
   -p:EmbedAssembliesIntoApk=true
 ```
 
-The GitHub Actions workflow performs the test/build path and uploads a debug-signed APK artifact. CI also checks that the standalone APK actually contains the Android app assembly, mobile layer and original `SubRenamer.Core`; this prevents a Fast Deployment-style APK from being published as a standalone build.
+The GitHub Actions workflow performs the tests, a trimmed persistence smoke test, and publishes an arm64 Debug APK with managed assemblies embedded for standalone use. It also probes smaller untrimmed/trimmed Release candidates using the same debug signing identity, checks each APK's ABI contents and reports package sizes. Release candidates still need real-device acceptance before becoming the default download.
 
 See [`docs/VALIDATION.md`](docs/VALIDATION.md).
 
