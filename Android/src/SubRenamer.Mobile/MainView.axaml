@@ -1,6 +1,8 @@
 <UserControl
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:presentation="using:SubRenamer.Mobile.Presentation"
+    xmlns:models="using:SubRenamer.Mobile.Models"
     x:Class="SubRenamer.Mobile.MainView">
   <Grid RowDefinitions="Auto,Auto,*" Margin="16">
     <StackPanel>
@@ -44,7 +46,7 @@
                  HorizontalAlignment="Stretch"
                  SelectionChanged="SourceList_SelectionChanged">
           <ListBox.ItemTemplate>
-            <DataTemplate>
+            <DataTemplate x:DataType="presentation:SourceCard">
               <Border Padding="10" Margin="0,0,0,6" BorderThickness="1" CornerRadius="8">
                 <TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/>
               </Border>
@@ -57,7 +59,7 @@
                   HorizontalAlignment="Stretch"
                   SelectionChanged="CandidateCombo_SelectionChanged">
           <ComboBox.ItemTemplate>
-            <DataTemplate>
+            <DataTemplate x:DataType="models:AttributionCandidate">
               <TextBlock Text="{Binding Display}" TextWrapping="Wrap"/>
             </DataTemplate>
           </ComboBox.ItemTemplate>

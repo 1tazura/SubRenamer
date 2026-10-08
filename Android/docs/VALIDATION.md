@@ -26,7 +26,7 @@ The Android workflow validates these layers in order:
 
    GitHub-hosted runners are ephemeral. If `SignAndroidPackage` is allowed to create its default debug key independently on every runner, successive APKs have different signing certificates and Android refuses an in-place update even when the package name and versionCode are correct.
 
-   The workflow therefore keeps a dedicated **debug-only** keystore in the GitHub Actions cache and explicitly passes it through `AndroidSigningKeyStore` / `AndroidSigningKeyAlias` / password properties. The cache is keyed separately from build caches, and workflow concurrency prevents several fresh runs from racing to establish different first-use keys.
+   The workflow therefore keeps a dedicated **debug-only** keystore in the GitHub Actions cache and explicitly passes it through `AndroidSigningKeyStore` / `AndroidSigningKeyAlias` / password properties. The cache is keyed separately from build caches, and push/PR events for the same head branch share a concurrency group to avoid racing first-use keys. This preserves signing identity only while that cache survives: after eviction, a new key cannot update an APK signed with the old key. Compare the artifact's certificate with the installed channel before assuming in-place updates are possible. Durable signing-key management remains required for a stable distribution channel.
 
    This is only the sideload/testing signing channel. A future public release must use a separately managed private release keystore/secret, not this cached debug identity.
 
@@ -41,6 +41,8 @@ The Android workflow validates these layers in order:
    - invalidating undo and cache when the authorized root changes.
 
    Both stores use generated `JsonSerializerContext` metadata. The JSON schema remains compatible with older installations. The smoke test treats `IL2026`/`IL3050` as errors; the Android trimmed candidate also treats `IL2026` as an error.
+
+   Source-card and target-candidate templates use typed compiled bindings instead of reflection bindings. Their displayed properties are checked by the XAML compiler and retained by direct references.
 
    This verifies managed persistence after trimming. It does not substitute for Android-device startup, SAF or archive-extraction tests.
 
