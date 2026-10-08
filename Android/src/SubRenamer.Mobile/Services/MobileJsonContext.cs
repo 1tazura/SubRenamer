@@ -8,6 +8,7 @@ namespace SubRenamer.Mobile.Services;
 // installs can update without losing their SAF bookmark or undo journal.
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(AppSettings))]
+[JsonSerializable(typeof(StorageRootIdentity))]
 internal partial class SettingsJsonContext : JsonSerializerContext;
 
 [JsonSerializable(typeof(ArchiveIndexCacheRecord[]))]

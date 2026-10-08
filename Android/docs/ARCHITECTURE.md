@@ -14,7 +14,11 @@ On Android ExternalStorageProvider, Avalonia's item enumeration already returns 
 
 ## 2. Video-target discovery
 
-`ScanService` recursively discovers directories below `Download/Torrent`.
+The current UI asks `ScanService` to recursively discover directories below
+`Download/Torrent`. Its independent-root overload scans an explicitly supplied
+video root directly (including that root), while subtitles still come from
+Download. This API is groundwork; no SMB picker/backend is connected yet.
+Targets retain the authorized root identity alongside their relative path.
 
 A `VideoTarget` is exactly a physical folder that directly contains one or more supported video files. The hierarchy is not flattened into one global video list.
 
@@ -108,6 +112,13 @@ For every subtitle successfully created by an apply batch, the app records:
 
 The record is persisted in app settings so undo survives an app restart.
 
+New records also persist `TargetRoot` (backend + authorized root URI) and
+`TargetFolderUri`. `UndoService` checks root/backend identity before enumeration
+and destination URI before opening files. Unknown/network identities are not
+reinterpreted as Download paths. Old JSON records omit these fields and remain
+Download-relative only; independent roots/live handles cannot redirect them.
+These optional fields use generated JSON metadata.
+
 `UndoService` resolves the recorded target directory, reopens each recorded destination and recomputes SHA-256 before deletion.
 
 A file is deleted only when its current content still matches the app-created content. If the file was edited or replaced after creation, it is preserved and reported as changed.
@@ -138,6 +149,15 @@ authorize Download
 ```
 
 The current matching-mode UI is intentionally compact. It exposes Core functionality but does not yet reproduce the desktop sample-file rule testers or per-item editor.
+
+## Network boundary
+
+The local SAF workflow is unchanged. Non-SAF target identities fail closed in
+Apply until a backend with verified server-side exclusive create is available.
+Do not adapt SMB by forwarding ordinary `CreateFileAsync`/`OpenWriteAsync`
+without atomic no-overwrite semantics and owned-handle failure cleanup.
+Actual NAS/CIFS observations and pending acceptance are in
+[`NETWORK_STORAGE.md`](NETWORK_STORAGE.md).
 
 ## 10. Hard safety invariants
 

@@ -99,11 +99,22 @@ public sealed class ScanService(ArchiveService archiveService)
         IStorageFolder downloadRoot,
         CancellationToken cancellationToken = default)
         => Task.Run(
-            () => ScanAllWithMetricsCoreAsync(downloadRoot, cancellationToken),
+            () => ScanAllWithMetricsCoreAsync(downloadRoot, null, cancellationToken),
+            cancellationToken);
+
+    // Explicit target root: recursively scan it directly, without imposing a
+    // Torrent child on a share/provider. Subtitle discovery remains in Download.
+    public Task<FullScanResult> ScanAllWithMetricsAsync(
+        IStorageFolder downloadRoot,
+        IStorageFolder videoRoot,
+        CancellationToken cancellationToken = default)
+        => Task.Run(
+            () => ScanAllWithMetricsCoreAsync(downloadRoot, videoRoot, cancellationToken),
             cancellationToken);
 
     private async Task<FullScanResult> ScanAllWithMetricsCoreAsync(
         IStorageFolder downloadRoot,
+        IStorageFolder? videoRoot,
         CancellationToken cancellationToken)
     {
         var rootWatch = Stopwatch.StartNew();
@@ -113,7 +124,11 @@ public sealed class ScanService(ArchiveService archiveService)
         var videoTask = Task.Run(async () =>
         {
             var watch = Stopwatch.StartNew();
-            var targets = await FindVideoTargetsFromTorrentRootCoreAsync(root.TorrentRoot, cancellationToken);
+            var targets = await FindVideoTargetsFromRootCoreAsync(
+                videoRoot ?? root.TorrentRoot,
+                videoRoot is null ? "Torrent" : "",
+                StorageRootIdentity.ForSaf((videoRoot ?? downloadRoot).Path),
+                cancellationToken);
             watch.Stop();
             return (Targets: targets, Elapsed: watch.Elapsed);
         }, cancellationToken);
@@ -146,19 +161,30 @@ public sealed class ScanService(ArchiveService archiveService)
         CancellationToken cancellationToken)
     {
         var root = await SnapshotDownloadRootAsync(downloadRoot, cancellationToken);
-        return await FindVideoTargetsFromTorrentRootCoreAsync(root.TorrentRoot, cancellationToken);
+        return await FindVideoTargetsFromRootCoreAsync(
+            root.TorrentRoot, "Torrent", StorageRootIdentity.ForSaf(downloadRoot.Path), cancellationToken);
     }
 
-    private async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsFromTorrentRootCoreAsync(
-        IStorageFolder? torrentRoot,
+    public Task<IReadOnlyList<VideoTarget>> FindVideoTargetsInRootAsync(
+        IStorageFolder videoRoot,
+        CancellationToken cancellationToken = default)
+        => Task.Run(
+            () => FindVideoTargetsFromRootCoreAsync(
+                videoRoot, "", StorageRootIdentity.ForSaf(videoRoot.Path), cancellationToken),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<VideoTarget>> FindVideoTargetsFromRootCoreAsync(
+        IStorageFolder? videoRoot,
+        string relativePrefix,
+        StorageRootIdentity rootIdentity,
         CancellationToken cancellationToken)
     {
-        if (torrentRoot is null)
+        if (videoRoot is null)
             return [];
 
         var targets = new List<VideoTarget>();
         var pending = new Queue<FolderWork>();
-        pending.Enqueue(new FolderWork(torrentRoot, "Torrent", 0));
+        pending.Enqueue(new FolderWork(videoRoot, relativePrefix, 0));
 
         // SAF folder enumeration is mostly provider IPC/storage latency. A small,
         // bounded amount of concurrency hides that latency without flooding the
@@ -179,7 +205,8 @@ public sealed class ScanService(ArchiveService archiveService)
                     targets.Add(new VideoTarget(
                         snapshot.Work.Folder,
                         snapshot.Work.RelativePath,
-                        snapshot.Videos.Select(x => x.File).ToArray()));
+                        snapshot.Videos.Select(x => x.File).ToArray(),
+                        rootIdentity));
                 }
 
                 if (snapshot.Work.Depth >= 8)
@@ -189,7 +216,9 @@ public sealed class ScanService(ArchiveService archiveService)
                 {
                     pending.Enqueue(new FolderWork(
                         child.Folder,
-                        $"{snapshot.Work.RelativePath}/{child.Name}",
+                        string.IsNullOrEmpty(snapshot.Work.RelativePath)
+                            ? child.Name
+                            : $"{snapshot.Work.RelativePath}/{child.Name}",
                         snapshot.Work.Depth + 1));
                 }
             }

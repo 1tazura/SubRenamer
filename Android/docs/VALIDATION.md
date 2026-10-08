@@ -104,6 +104,17 @@ CI cannot fully simulate every Android `DocumentsProvider`, so code review and r
 - weak work attribution requires user choice;
 - undo only deletes unchanged app-created outputs.
 
+## Termux device validation of network-storage groundwork
+
+The phone ran the original 52 tests and all 38 Android managed-layer tests
+(including 11 independent-root/undo-identity tests). It also published and ran
+the reflection-disabled trimmed persistence smoke for `linux-bionic-arm64`,
+including explicit backend/root/folder identity restoration and legacy defaults.
+These are not tests of a new APK or SMB writes. No new APK has been built or
+installed; isolated network apply/undo acceptance remains pending.
+See [`NETWORK_STORAGE.md`](NETWORK_STORAGE.md) for environment/probe/signature
+observations and preservation details.
+
 ## Failure diagnostics
 
 The workflow uploads Android test/build diagnostic logs when those stages fail. Normal successful runs only need the APK artifact, package listing and signing-certificate record.

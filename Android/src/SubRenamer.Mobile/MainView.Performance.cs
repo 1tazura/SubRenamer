@@ -110,7 +110,9 @@ public partial class MainView
                         DateTimeOffset.UtcNow,
                         result.CreatedFiles
                             .Select(x => new UndoFileRecord(x.DestinationName, x.Sha256))
-                            .ToArray());
+                            .ToArray(),
+                        plan.Target.RootIdentity,
+                        plan.Target.Folder.Path.AbsoluteUri);
 
                     await _settings.SaveUndoBatchAsync(batch);
                     _undoBatch = batch;
@@ -177,7 +179,9 @@ public partial class MainView
             // destination. Reusing it avoids walking Download/Torrent again.
             // After process restart _currentPlan is null, so persisted undo still
             // falls back to relative-path resolution inside UndoService.
-            var resolvedTarget = _currentPlan?.Target.RelativePath == batch.TargetRelativePath
+            var resolvedTarget = _currentPlan?.Target.RelativePath == batch.TargetRelativePath &&
+                                 _currentPlan.Target.RootIdentity == batch.TargetRoot &&
+                                 _currentPlan.Target.Folder.Path.AbsoluteUri == batch.TargetFolderUri
                 ? _currentPlan.Target.Folder
                 : null;
 

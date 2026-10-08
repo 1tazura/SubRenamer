@@ -22,21 +22,36 @@ public sealed class UndoService(SettingsStore settingsStore)
         IStorageFolder downloadRoot,
         UndoBatchRecord batch,
         CancellationToken cancellationToken = default,
-        IStorageFolder? resolvedTarget = null)
+        IStorageFolder? resolvedTarget = null,
+        IStorageFolder? videoRoot = null)
     {
         var totalWatch = Stopwatch.StartNew();
         var concurrency = Math.Min(MaxUndoConcurrency, Math.Max(1, batch.Files.Count));
 
-        // Same-session undo can reuse the exact target folder handle kept by the
-        // current plan. Persisted undo after app restart has no live handle and
-        // safely falls back to resolving the stored relative path from Download.
         var resolveWatch = Stopwatch.StartNew();
-        var target = resolvedTarget;
-        if (target is null)
+        // Legacy journals are Download-relative only. Never let a newly selected
+        // video root reinterpret them. Explicit journals must match the restored
+        // backend/root before enumeration, even with a same-session live handle.
+        var root = batch.TargetRoot is null ? downloadRoot : videoRoot ?? downloadRoot;
+        if (batch.TargetRoot is not null && !batch.TargetRoot.MatchesSaf(root.Path))
+            throw new InvalidOperationException("撤销存储后端或根目录身份不匹配；未删除任何文件。");
+
+        IStorageFolder? target = null;
+        if (batch.TargetRoot is not null &&
+            batch.TargetFolderUri is not null &&
+            resolvedTarget?.Path.AbsoluteUri == batch.TargetFolderUri)
+        {
+            target = resolvedTarget;
+        }
+        else
         {
             target = await StorageAccessService.ResolveRelativeFolderAsync(
-                downloadRoot, batch.TargetRelativePath, cancellationToken);
+                root, batch.TargetRelativePath, cancellationToken);
         }
+
+        if (target is not null && batch.TargetFolderUri is not null &&
+            target.Path.AbsoluteUri != batch.TargetFolderUri)
+            throw new InvalidOperationException("撤销目标目录身份不匹配；未删除任何文件。");
         resolveWatch.Stop();
 
         if (target is null)

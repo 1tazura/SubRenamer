@@ -7,7 +7,9 @@ public sealed record UndoFileRecord(string DestinationName, string Sha256);
 public sealed record UndoBatchRecord(
     string TargetRelativePath,
     DateTimeOffset CreatedAtUtc,
-    IReadOnlyList<UndoFileRecord> Files);
+    IReadOnlyList<UndoFileRecord> Files,
+    StorageRootIdentity? TargetRoot = null,
+    string? TargetFolderUri = null);
 
 public sealed record AppSettings(
     string? DownloadBookmark = null,

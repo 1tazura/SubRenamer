@@ -13,6 +13,15 @@ These are invariants, not optional features:
 - keep standalone APK validation in CI;
 - retain safe undo semantics: only delete outputs created by the app and unchanged since creation.
 
+## Current focus — independent network video storage
+
+Read-only device probing confirmed that `Completed` on `192.168.1.128` is an
+anonymously listable SMB share. A real CIFS mount attempt failed; keep the APK
+no-root. Independent-root scanning and identity-scoped undo groundwork are in
+place, but the UI/network backend and exclusive SMB creation are still pending.
+Complete isolated-directory conflict/disconnect/restart/identity acceptance
+before writing into normal media directories. See [`NETWORK_STORAGE.md`](NETWORK_STORAGE.md).
+
 ## P1 — make matching recoverable
 
 ### Core matching modes — implemented

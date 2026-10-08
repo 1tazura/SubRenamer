@@ -89,6 +89,15 @@ A concrete storage example is in [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 The Android UI is still intentionally small. It does **not** yet expose the full desktop feature set. See [`docs/FEATURES.md`](docs/FEATURES.md) for an explicit comparison instead of inferring feature support from the desktop README.
 
+## Network storage status
+
+The current UI still uses local SAF Download/Torrent; it cannot yet place
+subtitles over SMB. A real-device read-only probe confirmed anonymous listing
+of `192.168.1.128/Completed`, and the first safety increment adds independent
+video-root scan APIs plus explicit persisted undo root/folder identities.
+See [`docs/NETWORK_STORAGE.md`](docs/NETWORK_STORAGE.md) for measured results,
+validation limits, and the remaining exclusive-create SMB implementation.
+
 ## Important missing features
 
 The largest remaining gaps are around recovery and output control rather than the Core matching engine itself:

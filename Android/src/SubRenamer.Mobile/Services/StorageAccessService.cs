@@ -177,6 +177,9 @@ public sealed class StorageAccessService(SettingsStore settingsStore)
             .Replace('\\', '/')
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        if (segments.Any(segment => segment is "." or ".."))
+            throw new ArgumentException("Relative folder path must not contain traversal segments.", nameof(relativePath));
+
         foreach (var segment in segments)
         {
             var next = await FindChildFolderAsync(current, segment, cancellationToken);

@@ -26,6 +26,11 @@ public sealed class ApplyService(ArchiveService archiveService)
         MatchPlan plan,
         CancellationToken cancellationToken = default)
     {
+        // IStorageFolder.CreateFileAsync does not promise server-side exclusive
+        // creation. Do not enable a network adapter through the SAF write path.
+        if (plan.Target.RootIdentity is { Backend: not StorageRootIdentity.SafBackend })
+            throw new NotSupportedException("网络目标必须使用已验证的排他创建后端；当前写入路径仅支持 SAF。");
+
         var totalWatch = Stopwatch.StartNew();
         var applied = 0;
         var skipped = 0;

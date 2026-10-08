@@ -454,7 +454,9 @@ public partial class MainView : UserControl
                         DateTimeOffset.UtcNow,
                         result.CreatedFiles
                             .Select(x => new UndoFileRecord(x.DestinationName, x.Sha256))
-                            .ToArray());
+                            .ToArray(),
+                        plan.Target.RootIdentity,
+                        plan.Target.Folder.Path.AbsoluteUri);
 
                     await _settings.SaveUndoBatchAsync(batch);
                     _undoBatch = batch;
